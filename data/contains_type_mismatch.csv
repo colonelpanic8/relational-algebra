@@ -1,0 +1,5 @@
+int_column,double_column
+1,2.0
+notanint,3.0
+3,24.0
+100,80.0

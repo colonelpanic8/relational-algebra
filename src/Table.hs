@@ -14,12 +14,14 @@ Portability : POSIX
 
 module Table
   ( evaluateRelation
+  , outputValue
   , Table(..)
   , TableError(..)
   , TableValue(..)
   ) where
 
 import Data.Maybe
+import Data.List
 import Select.Expression
 import Select.Relation
 import Text.Printf
@@ -41,6 +43,15 @@ data TableValue
   | RealValue Double
   | ErrorValue TableError
     deriving (Read, Show)
+
+outputValue v =
+  case v of
+    AnyValue s -> s
+    StringValue s -> s
+    BoolValue b -> show b
+    IntValue i -> show i
+    RealValue r -> show r
+    ErrorValue e -> show e
 
 data Table = Table
   { columnNames :: [String]
@@ -232,7 +243,7 @@ evaluateRelation (WHERE rel predicate) =
           processRow e@(Left _) _ = e
           processRow (Right selected) row =
             case evalRow row of
-              BoolValue b -> Right $ if b then row:selected else selected
+              BoolValue b -> Right $ if b then selected ++ [row] else selected
               ErrorValue e -> Left e
               v -> Left $ TypeError v
           selectedRows = foldl processRow (Right []) $ rows res
@@ -253,7 +264,7 @@ evaluateRelation (INNER_JOIN_ON rel1 rel2 predicate) =
           processRow e@(Left _) _ = e
           processRow (Right selected) (r1, r2) =
             case includePair r1 r2 of
-              BoolValue b -> Right $ if b then (r1 ++ r2):selected else selected
+              BoolValue b -> Right $ if b then selected ++ [r1 ++ r2] else selected
               ErrorValue e -> Left e
               v -> Left $ TypeError v
           selectedRows = foldl processRow (Right []) cartesianProduct
@@ -264,3 +275,25 @@ evaluateRelation (INNER_JOIN_ON rel1 rel2 predicate) =
         makeTableFromRows <$> selectedRows
     (Left e, _) -> Left e
     (_, Left e) -> Left e
+evaluateRelation (UNION rel1 rel2) =
+  case (evaluateRelation rel1, evaluateRelation rel2) of
+    (Right t1, Right t2) ->
+      let cn1 = columnNames t1
+          cn2 = columnNames t2
+          newTableColumns = nub $ cn1 ++ cn2
+          makeNewRows table =
+            let namesLookup = makeIndexedNames $ columnNames table
+                getValue row columnName =
+                    maybe (StringValue "") (row !!) $ lookup columnName namesLookup
+                makeRow row = map (getValue row) newTableColumns
+            in
+              map makeRow $ rows table
+      in
+        Right Table { columnNames = newTableColumns
+                    , rows = makeNewRows t1 ++ makeNewRows t2
+                    }
+    (Left v, _) -> Left v
+    (_, Left v) -> Left v
+  where
+    makeIndexedNames cn =
+          let indexes = [0..(length cn - 1)] in zip cn indexes
