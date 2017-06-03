@@ -13,18 +13,35 @@ Relations
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TupleSections #-}
 
-module Select.Relation
-  ( Relation(..)
-  , RelationIdentifier
-  ) where
+-- TODO: Add export list
+module Select.Relation where
 
-import Select.Expression
+import           Control.Monad
+import           Data.Either
+import           Data.List
+import           Data.List.Split
+import           Data.Maybe
+import qualified Data.Set as S
+import           Debug.Trace
+import           Pipes
+import           Text.Printf
+
+import           Select.Expression
 
 infix 1 `FROM`
 infixr 2 `UNION`
 infix 3 `INNER_JOIN_ON`
 infix 4 `WHERE`
+
+-- | Identifier for a relation
+type RelationIdentifier = Relation String String FilePath
 
 -- | Relation abstract syntax tree
 data Relation scope variable table
@@ -34,97 +51,220 @@ data Relation scope variable table
     (Relation scope variable table)
   | WHERE
     (Relation scope variable table)
-    (Expression variable) -- predicate
+    (TypedExp Bool variable) -- predicate
   | UNION (Relation scope variable table) (Relation scope variable table)
   | INNER_JOIN_ON
     (Relation scope variable table `As` scope)
     (Relation scope variable table `As` scope)
-    (Expression (scope, variable))
-  deriving (Read,Show,Eq,Functor,Foldable,Traversable)
+    (TypedExp Bool (scope, variable))
 
--- | Identifier for a relation
-type RelationIdentifier = Relation String String FilePath
+convertRelation :: (t -> IO u) -> Relation s v t -> IO (Relation s v u)
+convertRelation convert rel =
+  case rel of
+    TABLE t -> TABLE <$> convert t
+    FROM exps rel -> FROM exps <$> recurse rel
+    WHERE rel exp -> WHERE <$> recurse rel <*> pure exp
+    UNION rel1 rel2 -> UNION <$> recurse rel1 <*> recurse rel2
+    INNER_JOIN_ON (AS rel1 name1) (AS rel2 name2) exp ->
+      INNER_JOIN_ON <$> (flip AS name1 <$> recurse rel1)
+                    <*> (flip AS name2 <$> recurse rel2)
+                    <*> pure exp
+  where recurse = convertRelation convert
 
-data RelationError = BadExpressionError ExpressionError
+data RelationError
+  = BadExpressionError
+  | ConflictingTypeError
+  | UnknownColumnError
+  | UnmatchedUnion
+  | BadValueError String
+    deriving Show
 
-data Table v = Table
-  { columnNames :: [v]
-  , rows :: [[Value]]
-  }
+data TypedRelation s v t = TypedRelation [(v, AnyType)] (Relation s v t)
 
-getName (AS _ name) = name
-getThing (AS x _) = x
-evaluateRelation :: Relation s v Table -> Either RelationError Table
-evaluateRelation (TABLE table) = Right table
-evaluateRelation (FROM namedExprs rel) =
-  case evaluateRelation rel of
-    Right res ->
-      let variableNames = columnNames res
-          exprs = map getThing namedExprs
-          newNames = map getName namedExprs
-          getSelectedRow row = map (evaluateExpression (zip variableNames row)) exprs
-      in
-        Right Table { columnNames = newNames, rows = map getSelectedRow $ rows res }
-    e -> e
-evaluateRelation (WHERE rel predicate) =
-  case evaluateRelation rel of
-    Right res ->
-      let variableNames = columnNames res
-          evalRow row = induceBool $ evaluateExpression (zip variableNames row) predicate
-          processRow e@(Left _) _ = e
-          processRow (Right selected) row =
-            case evalRow row of
-              BoolValue b -> Right $ if b then selected ++ [row] else selected
-              ErrorValue e -> Left e
-              v -> Left $ TypeError v
-          selectedRows = foldl processRow (Right []) $ rows res
-          rowsToRes theRows = res { rows = theRows }
-      in
-        rowsToRes <$> selectedRows
-    e -> e
-evaluateRelation (INNER_JOIN_ON rel1 rel2 predicate) =
-  case (evaluateRelation $ getThing rel1, evaluateRelation $ getThing rel2) of
-    (Right t1, Right t2) ->
-      let t1Name = getName rel1
-          t2Name = getName rel2
-          t1VarNames = (t1Name,) <$> columnNames t1
-          t2VarNames = (t2Name,) <$> columnNames t2
-          bindings r1 r2 = zip t1VarNames r1 ++ zip t2VarNames r2
-          includePair r1 r2 = induceBool $ evaluateExpression (bindings r1 r2) predicate
-          cartesianProduct = [(r1, r2) | r1 <- rows t1, r2 <- rows t2]
-          processRow e@(Left _) _ = e
-          processRow (Right selected) (r1, r2) =
-            case includePair r1 r2 of
-              BoolValue b -> Right $ if b then selected ++ [r1 ++ r2] else selected
-              ErrorValue e -> Left e
-              v -> Left $ TypeError v
-          selectedRows = foldl processRow (Right []) cartesianProduct
-          newColumns = map (printf "%s.%s" t1Name) (columnNames t1) ++
-                       map (printf "%s.%s" t2Name) (columnNames t2)
-          makeTableFromRows sel = Table { rows = sel, columnNames = newColumns }
-      in
-        makeTableFromRows <$> selectedRows
-    (Left e, _) -> Left e
-    (_, Left e) -> Left e
-evaluateRelation (UNION rel1 rel2) =
-  case (evaluateRelation rel1, evaluateRelation rel2) of
-    (Right t1, Right t2) ->
-      let cn1 = columnNames t1
-          cn2 = columnNames t2
-          newTableColumns = nub $ cn1 ++ cn2
-          makeNewRows table =
-            let namesLookup = makeIndexedNames $ columnNames table
-                getValue row columnName =
-                    maybe (StringValue "") (row !!) $ lookup columnName namesLookup
-                makeRow row = map (getValue row) newTableColumns
-            in
-              map makeRow $ rows table
-      in
-        Right Table { columnNames = newTableColumns
-                    , rows = makeNewRows t1 ++ makeNewRows t2
-                    }
-    (Left v, _) -> Left v
-    (_, Left v) -> Left v
+type TypeRequirement = AnyType
+type TypeRequirements v = [(v, TypeRequirement)]
+
+getReqsFromExprs
+  :: Eq v
+  => [Expression v] -> Either RelationError (TypeRequirements v)
+getReqsFromExprs exprs =
+  mapM getTypeRequirements exprs >>= mergeTypeRequirements
+
+getTypeRequirements :: Eq v => Expression v -> Either RelationError (TypeRequirements v)
+getTypeRequirements (Expression te) =
+  case te of
+    Literal v -> Right []
+    c@(Column name) -> Right [(name, typeOfTypedExp c)]
+    And e1 e2 -> getReqs e1 e2
+    Gt  e1 e2 -> getReqs e1 e2
+    Gte e1 e2 -> getReqs e1 e2
+    Lt  e1 e2 -> getReqs e1 e2
+    Lte e1 e2 -> getReqs e1 e2
+    Or  e1 e2 -> getReqs e1 e2
+    Equ e1 e2 -> getReqs e1 e2
+    Neq e1 e2 -> getReqs e1 e2
+    Add e1 e2 -> getReqs e1 e2
+    Sub e1 e2 -> getReqs e1 e2
+    Mul e1 e2 -> getReqs e1 e2
+    Mod e1 e2 -> getReqs e1 e2
+    Not e1 -> getTypeRequirements $ Expression e1
+    Neg e1 -> getTypeRequirements $ Expression e1
   where
-    makeIndexedNames cn =
-          let indexes = [0..(length cn - 1)] in zip cn indexes
+    getReqs
+      :: (Eq v, Identifiable t)
+      => TypedExp t v
+      -> TypedExp t v
+      -> Either RelationError (TypeRequirements v)
+    getReqs e1 e2 = getReqsFromExprs [Expression e1, Expression e2]
+
+
+mergeTypeRequirements
+  :: Eq v
+  => [TypeRequirements v] -> Either RelationError (TypeRequirements v)
+mergeTypeRequirements requirements =
+  foldl handleName (Right []) allNames
+  where allNames = nub $ requirements >>= (map fst)
+        handleName theEither columnName = theEither >>= \newReqs ->
+          let allTypes = catMaybes $ map (lookup columnName) requirements
+              allMatch = all (== head allTypes) (tail allTypes)
+          in
+            if allMatch
+            then Right $ (columnName, head allTypes):newReqs
+            else Left $ ConflictingTypeError
+
+checkRequirements reqs exps =
+  if all (flip elem columnTypes) reqs
+  then Right columnTypes
+  else Left ConflictingTypeError -- TODO: this could actually be a bunch of stuff
+  where columnTypes = map expToReq exps
+        expToReq (AS (Expression te) name) = (name, typeOfTypedExp te)
+
+data TypedRowProducer m v
+  = TypedRowProducer { columnTypes :: [(v, AnyType)]
+                     , rowProducer :: Producer [Value] m ()
+                     }
+
+nameRow typedProducer =
+  let producerTypes = columnTypes typedProducer
+      producerNames = map fst producerTypes
+      nameRow row = zip producerNames row
+  in nameRow
+
+class (Eq v, Monad m) => BuildsRowProducer t m v where
+  getRowProducer
+    :: t
+    -> [(v, TypeRequirement)]
+    -> (Either RelationError (TypedRowProducer m v))
+
+class NameCombine n where
+  -- Law is combine . split = id when okayToSplit n
+  combineName :: (n, n) -> n
+  splitName :: n -> (n, n)
+  okayToSplit :: n -> Bool
+
+instance NameCombine String where
+  combineName (a, b) = printf "%s.%s" a b
+  splitName name =
+    let nameList = splitOn "." name
+    in (head nameList, head $ tail nameList)
+  okayToSplit n = length (filter (== '.') n) == 1
+
+splitRequirements reqs =
+  map helper reqs
+  where helper (name, t) = (splitName name, t)
+
+groupReqs reqs =
+  map unscopeGroup $ groupBy shouldGroup reqs
+  where shouldGroup ((s1, _), _) ((s2, _), _) = s1 == s2
+        unscope req = (snd $ fst req, snd req)
+        unscopeGroup agroup = (fst $ fst $ head agroup, map unscope agroup)
+
+relationToRowProducer
+  :: (BuildsRowProducer t m v, Eq v, Show v, NameCombine v)
+  => TypeRequirements v
+  -> Relation v v t
+  -> Either RelationError (TypedRowProducer m v)
+relationToRowProducer reqs rel =
+  case rel of
+    TABLE t -> getRowProducer t reqs
+    FROM exps rel ->
+      do
+        newColumnTypes <- checkRequirements reqs exps
+        let unnamed = map (\(AS exp _) -> exp) exps
+        newReqs <- getReqsFromExprs unnamed
+        typedProducer <- relationToRowProducer newReqs rel
+        let rowNamer = nameRow typedProducer
+            producerRows = rowProducer typedProducer
+            handleRow row =
+              let namedRow = rowNamer row
+                  eval (Expression te) =
+                    case Value <$> evaluateExpression namedRow te of
+                      Left _ -> undefined -- XXX: this should never happen
+                      Right v -> v
+              in yield $ map eval unnamed
+            thisProducer = for producerRows handleRow
+        return TypedRowProducer
+                 { columnTypes = newColumnTypes
+                 , rowProducer = thisProducer
+                 }
+    WHERE rel pred ->
+      do
+        predReqs <- getTypeRequirements (Expression pred)
+        merged <- mergeTypeRequirements [predReqs, reqs]
+        typedProducer <- relationToRowProducer merged rel
+        let rowNamer = nameRow typedProducer
+            handleRow row =
+              let predResult = evaluateExpression (rowNamer row) pred
+              in case trace (show row) $ trace (show predResult) predResult of
+                   Right b -> if b then yield row else discard row
+                   Left _ -> undefined -- XXX: hmm what to do here
+            thisProducer = for (rowProducer typedProducer) handleRow
+        return typedProducer { rowProducer = thisProducer }
+    INNER_JOIN_ON (AS rel1 scope1) (AS rel2 scope2) pred ->
+      do
+        predReqs <- getTypeRequirements (Expression pred)
+        -- TODO: make sure splits are okay
+        let reqPairs = splitRequirements reqs ++ predReqs
+            grouped = groupReqs reqPairs
+            rel1Reqs = fromMaybe [] $ lookup scope1 grouped
+            rel2Reqs = fromMaybe [] $ lookup scope2 grouped
+        producer1 <- relationToRowProducer rel1Reqs rel1
+        producer2 <- relationToRowProducer rel2Reqs rel2
+        let nameRowScoped producer scope =
+              let producerTypes = columnTypes producer
+                  producerNames = map fst producerTypes
+                  scopedNames = map (scope,) producerNames
+                  nameRow row = zip scopedNames row
+              in nameRow
+            nameRow1 = nameRowScoped producer1 scope1
+            nameRow2 = nameRowScoped producer2 scope2
+            handleRowPair row1 =
+              let innerBody row2 =
+                    let combined = nameRow1 row1 ++ nameRow2 row2
+                    in case evaluateExpression combined pred of
+                         Right b -> if b then yield $ row1 ++ row2 else discard () -- XXX: ...
+              in for (rowProducer producer2) innerBody
+            thisProducer = for (rowProducer producer1) handleRowPair
+            makeScopedTypes namedTypes scope =
+              let addScope (n, t) = (combineName (scope, n), t) in
+              map addScope namedTypes
+            newColumnTypes = makeScopedTypes (columnTypes producer1) scope1 ++
+                             makeScopedTypes (columnTypes producer2) scope2
+        return TypedRowProducer { rowProducer = thisProducer
+                                , columnTypes = newColumnTypes
+                                }
+    UNION rel1 rel2 -> do
+      producer1 <- relationToRowProducer reqs rel1
+      producer2 <- relationToRowProducer reqs rel2
+      let columns1 = columnTypes producer1
+          columns2 = columnTypes producer2
+          permutation = catMaybes $ map (flip elemIndex columns2) columns1
+          equalAsSets = all (flip elem columns1) columns2 &&
+                        length columns1 == length columns2 -- No sorting or hasing so this is the only way... this should be small anyway
+          permuteRow row = yield $ map (row !!) permutation
+      if equalAsSets then
+        return producer1 { rowProducer = rowProducer producer1 >>
+                                         for (rowProducer producer2) permuteRow
+                         }
+      else
+        Left UnmatchedUnion

@@ -14,46 +14,82 @@ Data types used for SQL expressions
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-
 module Select.Expression
   ( As
-  , TypedExp(..)
+  , AnyType(..)
   , Expression(..)
   , ExpressionError(..)
   , Identifiable(..)
   , Named(..)
+  , Type(..)
+  , TypedExp(..)
   , Value(..)
+  , as
+  , bColumn
+  , colBool
+  , colInt
+  , colReal
+  , colString
   , evaluateExpression
+  , iColumn
+  , rColumn
+  , readAsType
+  , sColumn
+  , typeOfTypedExp
   , typeOfUnTypedExp
+  , typeOfValue
   ) where
 
 import Data.Maybe
 import Data.Unique
-import Unsafe.Coerce
 import System.IO.Unsafe
+import Text.Read
+import Unsafe.Coerce
 
 data IdentifiableUnique t = IdentifiableUnique Unique deriving (Eq)
 getUnique :: IdentifiableUnique t -> Unique
 getUnique (IdentifiableUnique u) = u
 
-class Identifiable t where
+class (Read t, Show t) => Identifiable t where
   getTypeIdentifier :: IdentifiableUnique t
 
-typeOfTypedExp :: Identifiable t => TypedExp t v -> IdentifiableUnique t
-typeOfTypedExp _ = getTypeIdentifier
+data Expression v = forall t. Identifiable t => Expression (TypedExp t v)
+data Value = forall t. Identifiable t => Value t
+data Type t = Type
+data AnyType = forall t. Identifiable t => AnyType (Type t)
 
-typeOfValue :: Identifiable t => t -> IdentifiableUnique t
-typeOfValue _ = getTypeIdentifier
+instance Show Value where
+  show (Value v) = show v
 
-typeOfUnTypedExp :: Expression v -> Unique
-typeOfUnTypedExp (Expression typed) = getUnique $ typeOfTypedExp typed
+instance Eq AnyType where
+  t1 == t2 = identifierOfAnyType t1 == identifierOfAnyType t2
 
-evaluate :: Identifiable t => TypedExp t v -> Value -> Either ExpressionError t
-evaluate toReplace (Value with) =
-  if getUnique (typeOfTypedExp toReplace) == getUnique (typeOfValue with)
+identifierOfType :: Identifiable t => Type t -> IdentifiableUnique t
+identifierOfType _ = getTypeIdentifier
+
+identifierOfAnyType :: AnyType -> Unique
+identifierOfAnyType (AnyType t) = getUnique $ identifierOfType t
+
+typeOfTypedExp :: forall t v. Identifiable t => TypedExp t v -> AnyType
+typeOfTypedExp _ = AnyType (Type :: Type t)
+
+typeOfValue :: forall t. Identifiable t => t -> AnyType
+typeOfValue _ = AnyType (Type :: Type t)
+
+typeOfUnTypedExp :: Expression v -> AnyType
+typeOfUnTypedExp (Expression typed) = typeOfTypedExp typed
+
+readAsType :: forall t. Identifiable t => Type t -> String -> Maybe t
+readAsType _ s = readMaybe s :: Maybe t
+
+substitute :: Identifiable t => TypedExp t v -> Value -> Either ExpressionError t
+substitute toReplace (Value with) =
+  if typeOfTypedExp toReplace == typeOfValue with
   then Right $ unsafeCoerce with
   else Left TypeError
 
@@ -62,10 +98,22 @@ booleanUnique = IdentifiableUnique $ unsafePerformIO newUnique
 instance Identifiable Bool where
   getTypeIdentifier = booleanUnique
 
-data Expression v = forall t. Identifiable t => Expression (TypedExp t v)
-data Value = forall t. Identifiable t => Value t
+stringUnique :: IdentifiableUnique String
+stringUnique = IdentifiableUnique $ unsafePerformIO newUnique
+instance Identifiable String where
+  getTypeIdentifier = stringUnique
 
-data ExpressionError = TypeError | BindingError
+intUnique :: IdentifiableUnique Int
+intUnique = IdentifiableUnique $ unsafePerformIO newUnique
+instance Identifiable Int where
+  getTypeIdentifier = intUnique
+
+realUnique :: IdentifiableUnique Double
+realUnique = IdentifiableUnique $ unsafePerformIO newUnique
+instance Identifiable Double where
+  getTypeIdentifier = realUnique
+
+data ExpressionError = TypeError | BindingError deriving Show
 
 data TypedExp t v where
   Literal :: Identifiable t => t -> TypedExp t v
@@ -94,7 +142,7 @@ evaluateExpression bindings expr =
     Literal v -> Right v
     c@(Column name) ->
       let mValue = lookup name bindings
-          evaluated = evaluate c <$> mValue
+          evaluated = substitute c <$> mValue
       in fromMaybe (Left BindingError) evaluated
     Not e1 -> not <$> eval e1
     Neg e1 -> negate <$> eval e1
@@ -137,3 +185,18 @@ data Named scope x = AS x scope
 
 -- | `As` is `Named` with type variables flipped
 type As x scope = Named scope x
+
+as x scope = AS (Expression x) scope
+
+sColumn :: t -> TypedExp String t
+sColumn n = Column n
+iColumn :: t -> TypedExp Int t
+iColumn n = Column n
+bColumn :: t -> TypedExp Bool t
+bColumn n = Column n
+rColumn :: t -> TypedExp Double t
+rColumn n = Column n
+colString = Expression . sColumn
+colBool = Expression . bColumn
+colReal = Expression . rColumn
+colInt = Expression . iColumn

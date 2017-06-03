@@ -9,6 +9,10 @@ Portability : POSIX
 ASTs for Selects
 -}
 
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 module Select
   ( Select(..)
   , SelectIdentifier
@@ -17,20 +21,25 @@ module Select
   , trim
   ) where
 
+import Control.Exception
+import Control.Monad
+import Control.Monad.Identity
 import Data.Char (isSpace)
 import Data.List
+import Data.Maybe
 import Data.Typeable
+import Debug.Trace
+import Pipes
+import Pipes.Prelude (toList)
 import Text.CSV
-import Control.Exception
+import Unsafe.Coerce
 
-import Table
 import Select.Relation
 import Select.Expression
 
 -- | Top level `Select` AST
 newtype Select scope variable table
   = SELECT (Relation scope variable table)
-  deriving (Eq,Show)
 
 -- | Identifier for SELECT
 type SelectIdentifier = Select String String FilePath
@@ -39,9 +48,15 @@ trim :: String -> String
 trim = f . f
 f = reverse . dropWhile isSpace
 
-data PredicateException = PredicateException TableError deriving (Show, Typeable)
+data PredicateException = PredicateException deriving (Show, Typeable)
 
 instance Exception PredicateException
+
+convertFilepathToTable :: FilePath -> IO CSVTable
+convertFilepathToTable path = do
+  csvString <- readFile path
+  let Right res = parseCSV path $ trim csvString
+  return $ CSVTable res
 
 -- | `execute` should take in a Select AST and a CSV filename for output
 -- and execute the select statement to create a new tabular dataset which
@@ -51,39 +66,44 @@ execute
   -> FilePath -- output
   -> IO ()
 execute (SELECT rel) output = do
-  r <- evaluateRelation <$> convertFilepathsToTables rel
-  case r of
-    Right result ->
-      let csvObj = (columnNames result):map (map outputValue) (rows result)
+  converted <- convertRelation convertFilepathToTable rel
+  let p = relationToRowProducer [] converted
+  case p of
+    Right producer -> do
+      let finalTable = toList $ rowProducer producer
+          showHack v@(Value s) = if typeOfValue s == stringType
+                                 then unsafeCoerce s
+                                 else show v
+          csvObj = (map fst $ columnTypes producer):map (map showHack) finalTable
           makeLine = intercalate ","
           csvString = intercalate "\n" $ map makeLine csvObj
-      in
-        writeFile output $ csvString
-    Left e -> throw $ PredicateException e
+      -- writeFile output $ show finalTable
+      writeFile output $ csvString
+    Left e -> writeFile output $ show e
+  return ()
 
-convertFilepathToTable :: FilePath -> IO (Relation String String Table)
-convertFilepathToTable path = do
-  csvString <- readFile path
-  let Right res = parseCSV path $ trim csvString
-  return $ TABLE $ Table { rows = map (map AnyValue) $ tail res, columnNames = head res }
 
-convertFilepathsToTables :: Relation String String FilePath -> IO (Relation String String Table)
-convertFilepathsToTables (TABLE filepath) = convertFilepathToTable filepath
-convertFilepathsToTables (FROM exps rel) =
-  do
-    updated <- convertFilepathsToTables rel
-    return $ FROM exps updated
-convertFilepathsToTables (WHERE rel exp) =
-  do
-    updated <- convertFilepathsToTables rel
-    return $ WHERE updated exp
-convertFilepathsToTables (UNION rel1 rel2) =
-  do
-    updated1 <- convertFilepathsToTables rel1
-    updated2 <- convertFilepathsToTables rel2
-    return $ UNION updated1 updated2
-convertFilepathsToTables (INNER_JOIN_ON (AS rel1 name1) (AS rel2 name2) exp) =
-  do
-    updated1 <- convertFilepathsToTables rel1
-    updated2 <- convertFilepathsToTables rel2
-    return $ INNER_JOIN_ON (AS updated1 name1) (AS updated2 name2) exp
+data CSVTable = CSVTable [[String]]
+stringType = AnyType (Type :: Type String)
+
+instance BuildsRowProducer CSVTable Identity String where
+  getRowProducer (CSVTable table) reqs =
+    let actualNames = head table
+        requiredNames = map fst reqs
+        getTypeForName name = fromMaybe stringType $ lookup name reqs
+        getPairForName name = (name, getTypeForName name)
+        typedNames = map getPairForName actualNames
+        types = trace (show requiredNames) $ map snd typedNames
+        tryRead at@(AnyType t) s =
+          if at == stringType
+            then Right $ Value s
+            else maybe (Left $ BadValueError s) (Right . Value) $ readAsType t s
+        typeRow row = zipWithM tryRead types row
+        typedTableOrError = mapM typeRow $ tail table
+        makeProducer valueTable =
+          Right $
+          TypedRowProducer
+          {columnTypes = typedNames, rowProducer = each valueTable}
+    in if all (flip elem actualNames) requiredNames
+         then typedTableOrError >>= makeProducer
+         else Left BadExpressionError -- TODO: give some info here
