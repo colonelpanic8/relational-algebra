@@ -25,17 +25,21 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Identity
 import Data.Char (isSpace)
+import Data.Maybe
+import Data.Dynamic
 import Data.List
 import Data.Maybe
+import Data.Proxy
 import Data.Typeable
 import Debug.Trace
-import Pipes
+import Pipes hiding (Proxy)
 import Pipes.Prelude (toList)
 import Text.CSV
+import Text.Read
 import Unsafe.Coerce
 
-import Select.Relation
 import Select.Expression
+import Select.Relation
 
 -- | Top level `Select` AST
 newtype Select scope variable table
@@ -71,10 +75,8 @@ execute (SELECT rel) output = do
   case p of
     Right producer -> do
       let finalTable = toList $ rowProducer producer
-          showHack v@(Value s) = if typeOfValue s == stringType
-                                 then unsafeCoerce s
-                                 else show v
-          csvObj = (map fst $ columnTypes producer):map (map showHack) finalTable
+          printValue dyn = fromMaybe (show dyn) $ fromDynamic dyn
+          csvObj = (map fst $ columnTypes producer):map (map writeDynamic) finalTable
           makeLine = intercalate ","
           csvString = intercalate "\n" $ map makeLine csvObj
       -- writeFile output $ show finalTable
@@ -82,9 +84,29 @@ execute (SELECT rel) output = do
     Left e -> writeFile output $ show e
   return ()
 
+readDynamic :: TypeRep -> String -> Maybe Dynamic
+readDynamic t s
+  | t == stringType = Just $ toDyn s
+  | t == intType = toDyn <$> (readMaybe s :: Maybe Int)
+  | t == realType = toDyn <$> (readMaybe s :: Maybe Double)
+  | t == boolType = toDyn <$> (readMaybe s :: Maybe Bool)
+  | otherwise = Nothing
+
+writeDynamic :: Dynamic -> String
+writeDynamic d =
+  fromMaybe "" $ (helper $ dynTypeRep d)
+  where helper t
+          | t == stringType = fromDynamic d
+          | t == intType = show <$> (fromDynamic d :: Maybe Int)
+          | t == realType = show <$> (fromDynamic d :: Maybe Double)
+          | t == boolType = show <$> (fromDynamic d :: Maybe Bool)
+          | otherwise = Nothing
 
 data CSVTable = CSVTable [[String]]
-stringType = AnyType (Type :: Type String)
+stringType = typeRep (Proxy :: Proxy String)
+intType = typeRep (Proxy :: Proxy Int)
+realType = typeRep (Proxy :: Proxy Double)
+boolType = typeRep (Proxy :: Proxy Bool)
 
 instance BuildsRowProducer CSVTable Identity String where
   getRowProducer (CSVTable table) reqs =
@@ -93,11 +115,11 @@ instance BuildsRowProducer CSVTable Identity String where
         getTypeForName name = fromMaybe stringType $ lookup name reqs
         getPairForName name = (name, getTypeForName name)
         typedNames = map getPairForName actualNames
-        types = trace (show requiredNames) $ map snd typedNames
-        tryRead at@(AnyType t) s =
-          if at == stringType
-            then Right $ Value s
-            else maybe (Left $ BadValueError s) (Right . Value) $ readAsType t s
+        types = map snd typedNames
+        tryRead tr s =
+          if tr == stringType
+            then Right $ toDyn s
+            else maybe (Left $ BadValueError s) Right $ readDynamic tr s
         typeRow row = zipWithM tryRead types row
         typedTableOrError = mapM typeRow $ tail table
         makeProducer valueTable =

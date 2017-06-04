@@ -27,12 +27,8 @@ main = hspec $
       execute selectJoinUnion "output_name2.csv"
       "output_name2.csv" `shouldHaveSameContentAs` "data/expected_output_union_join.csv"
 
-    -- it "handles type errors" $ do
-    --   execute selectAdditionAndTypeErrors "mismatch_output.csv"
-    --   "mismatch_output.csv" `shouldHaveSameContentAs` "data/expected_mismatch_output.sh"
-
-    -- it "handles predicate errors" $ do
-    --   execute selectPredicateError "predicate_error.csv" `shouldThrow` anyException
+    it "handles type errors" $ do
+      execute selectAdditionAndTypeErrors "mismatch_output.csv"
 
 selectTable :: SelectIdentifier
 selectTable = SELECT (TABLE "data/people.csv")
@@ -63,17 +59,17 @@ selectJoinUnion = SELECT $
     TABLE "data/customer_table.csv" `AS` "customers"
   ) (sColumn ("orders","customer_id") `Equ` Column ("customers","customer_id"))
 
--- selectPredicateError :: SelectIdentifier
--- selectPredicateError =
---   SELECT $ TABLE "data/contains_type_mismatch.csv"
---            `WHERE`
---            Column "int_column" `Add` Column "double_column" `Gt` Literal 27
+selectPredicateError :: SelectIdentifier
+selectPredicateError =
+  SELECT $ TABLE "data/contains_type_mismatch.csv"
+           `WHERE`
+           iColumn "int_column" `Add` Column "double_column" `Gt` Literal 27
 
--- selectAdditionAndTypeErrors :: SelectIdentifier
--- selectAdditionAndTypeErrors = SELECT $
---   [ Column "int_column" `Add` Column "double_column" `AS` "added" ]
---   `FROM`
---    TABLE "data/contains_type_mismatch.csv"
+selectAdditionAndTypeErrors :: SelectIdentifier
+selectAdditionAndTypeErrors = SELECT $
+  [ iColumn "int_column" `Add` Column "double_column" `as` "added" ]
+  `FROM`
+   TABLE "data/contains_type_mismatch.csv"
 
 shouldHaveSameContentAs :: FilePath -> FilePath -> Expectation
 file1 `shouldHaveSameContentAs` file2 =

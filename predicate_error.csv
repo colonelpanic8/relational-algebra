@@ -1,1 +1,1 @@
-TypeError (ErrorValue (ReadColumnError "Real" "notanint"))
+BadValueError "2.0"

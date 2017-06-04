@@ -24,11 +24,13 @@ Relations
 module Select.Relation where
 
 import           Control.Monad
+import           Data.Dynamic
 import           Data.Either
 import           Data.List
 import           Data.List.Split
 import           Data.Maybe
 import qualified Data.Set as S
+import           Data.Typeable
 import           Debug.Trace
 import           Pipes
 import           Text.Printf
@@ -79,9 +81,7 @@ data RelationError
   | BadValueError String
     deriving Show
 
-data TypedRelation s v t = TypedRelation [(v, AnyType)] (Relation s v t)
-
-type TypeRequirement = AnyType
+type TypeRequirement = TypeRep
 type TypeRequirements v = [(v, TypeRequirement)]
 
 getReqsFromExprs
@@ -111,7 +111,7 @@ getTypeRequirements (Expression te) =
     Neg e1 -> getTypeRequirements $ Expression e1
   where
     getReqs
-      :: (Eq v, Identifiable t)
+      :: (Eq v, Typeable t)
       => TypedExp t v
       -> TypedExp t v
       -> Either RelationError (TypeRequirements v)
@@ -140,8 +140,8 @@ checkRequirements reqs exps =
         expToReq (AS (Expression te) name) = (name, typeOfTypedExp te)
 
 data TypedRowProducer m v
-  = TypedRowProducer { columnTypes :: [(v, AnyType)]
-                     , rowProducer :: Producer [Value] m ()
+  = TypedRowProducer { columnTypes :: [(v, TypeRep)]
+                     , rowProducer :: Producer [Dynamic] m ()
                      }
 
 nameRow typedProducer =
@@ -198,7 +198,7 @@ relationToRowProducer reqs rel =
             handleRow row =
               let namedRow = rowNamer row
                   eval (Expression te) =
-                    case Value <$> evaluateExpression namedRow te of
+                    case toDyn <$> evaluateExpression namedRow te of
                       Left _ -> undefined -- XXX: this should never happen
                       Right v -> v
               in yield $ map eval unnamed
@@ -214,10 +214,9 @@ relationToRowProducer reqs rel =
         typedProducer <- relationToRowProducer merged rel
         let rowNamer = nameRow typedProducer
             handleRow row =
-              let predResult = evaluateExpression (rowNamer row) pred
-              in case trace (show row) $ trace (show predResult) predResult of
-                   Right b -> if b then yield row else discard row
-                   Left _ -> undefined -- XXX: hmm what to do here
+              case evaluateExpression (rowNamer row) pred of
+                Right b -> if b then yield row else discard row
+                Left _ -> undefined -- XXX: hmm what to do here
             thisProducer = for (rowProducer typedProducer) handleRow
         return typedProducer { rowProducer = thisProducer }
     INNER_JOIN_ON (AS rel1 scope1) (AS rel2 scope2) pred ->

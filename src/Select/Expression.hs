@@ -21,14 +21,11 @@ Data types used for SQL expressions
 
 module Select.Expression
   ( As
-  , AnyType(..)
   , Expression(..)
   , ExpressionError(..)
-  , Identifiable(..)
+  , Typeable(..)
   , Named(..)
-  , Type(..)
   , TypedExp(..)
-  , Value(..)
   , as
   , bColumn
   , colBool
@@ -38,105 +35,54 @@ module Select.Expression
   , evaluateExpression
   , iColumn
   , rColumn
-  , readAsType
   , sColumn
   , typeOfTypedExp
-  , typeOfUnTypedExp
-  , typeOfValue
   ) where
 
+import Data.Dynamic
 import Data.Maybe
+import Data.Proxy
+import Data.Typeable
 import Data.Unique
 import System.IO.Unsafe
 import Text.Read
 import Unsafe.Coerce
 
-data IdentifiableUnique t = IdentifiableUnique Unique deriving (Eq)
-getUnique :: IdentifiableUnique t -> Unique
-getUnique (IdentifiableUnique u) = u
+data Expression v = forall t. Typeable t => Expression (TypedExp t v)
 
-class (Read t, Show t) => Identifiable t where
-  getTypeIdentifier :: IdentifiableUnique t
+typeOfTypedExp :: forall t v. Typeable t => TypedExp t v -> TypeRep
+typeOfTypedExp _ = typeRep (Proxy :: Proxy t)
 
-data Expression v = forall t. Identifiable t => Expression (TypedExp t v)
-data Value = forall t. Identifiable t => Value t
-data Type t = Type
-data AnyType = forall t. Identifiable t => AnyType (Type t)
-
-instance Show Value where
-  show (Value v) = show v
-
-instance Eq AnyType where
-  t1 == t2 = identifierOfAnyType t1 == identifierOfAnyType t2
-
-identifierOfType :: Identifiable t => Type t -> IdentifiableUnique t
-identifierOfType _ = getTypeIdentifier
-
-identifierOfAnyType :: AnyType -> Unique
-identifierOfAnyType (AnyType t) = getUnique $ identifierOfType t
-
-typeOfTypedExp :: forall t v. Identifiable t => TypedExp t v -> AnyType
-typeOfTypedExp _ = AnyType (Type :: Type t)
-
-typeOfValue :: forall t. Identifiable t => t -> AnyType
-typeOfValue _ = AnyType (Type :: Type t)
-
-typeOfUnTypedExp :: Expression v -> AnyType
-typeOfUnTypedExp (Expression typed) = typeOfTypedExp typed
-
-readAsType :: forall t. Identifiable t => Type t -> String -> Maybe t
-readAsType _ s = readMaybe s :: Maybe t
-
-substitute :: Identifiable t => TypedExp t v -> Value -> Either ExpressionError t
-substitute toReplace (Value with) =
-  if typeOfTypedExp toReplace == typeOfValue with
-  then Right $ unsafeCoerce with
-  else Left TypeError
-
-booleanUnique :: IdentifiableUnique Bool
-booleanUnique = IdentifiableUnique $ unsafePerformIO newUnique
-instance Identifiable Bool where
-  getTypeIdentifier = booleanUnique
-
-stringUnique :: IdentifiableUnique String
-stringUnique = IdentifiableUnique $ unsafePerformIO newUnique
-instance Identifiable String where
-  getTypeIdentifier = stringUnique
-
-intUnique :: IdentifiableUnique Int
-intUnique = IdentifiableUnique $ unsafePerformIO newUnique
-instance Identifiable Int where
-  getTypeIdentifier = intUnique
-
-realUnique :: IdentifiableUnique Double
-realUnique = IdentifiableUnique $ unsafePerformIO newUnique
-instance Identifiable Double where
-  getTypeIdentifier = realUnique
+substitute
+  :: Typeable t
+  => TypedExp t v -> Dynamic -> Either ExpressionError t
+substitute _ dyn =
+  maybe (Left TypeError) Right $ fromDynamic dyn
 
 data ExpressionError = TypeError | BindingError deriving Show
 
 data TypedExp t v where
-  Literal :: Identifiable t => t -> TypedExp t v
-  Column :: Identifiable t => v -> TypedExp t v
+  Literal :: Typeable t => t -> TypedExp t v
+  Column :: Typeable t => v -> TypedExp t v
   Not :: TypedExp Bool v -> TypedExp Bool v
   And :: TypedExp Bool v -> TypedExp Bool v -> TypedExp Bool v
   Or  :: TypedExp Bool v -> TypedExp Bool v -> TypedExp Bool v
-  Equ :: (Identifiable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Neq :: (Identifiable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Gt  :: (Identifiable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Gte :: (Identifiable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Lt  :: (Identifiable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Lte :: (Identifiable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Neg :: (Identifiable t, Num t) => TypedExp t v -> TypedExp t v
-  Add :: (Identifiable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Sub :: (Identifiable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Mul :: (Identifiable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Div :: (Identifiable t, Fractional t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Mod :: (Identifiable t, Integral t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Equ :: (Typeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Neq :: (Typeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Gt  :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Gte :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Lt  :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Lte :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Neg :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v
+  Add :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Sub :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Mul :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Div :: (Typeable t, Fractional t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Mod :: (Typeable t, Integral t) => TypedExp t v -> TypedExp t v -> TypedExp t v
 
 evaluateExpression
-  :: forall v t. (Identifiable t, Eq v, Show v)
-  => [(v, Value)] -> TypedExp t v -> Either ExpressionError t
+  :: forall v t. (Typeable t, Eq v, Show v)
+  => [(v, Dynamic)] -> TypedExp t v -> Either ExpressionError t
 evaluateExpression bindings expr =
   case expr of
     Literal v -> Right v
@@ -161,14 +107,14 @@ evaluateExpression bindings expr =
     Div e1 e2 -> applyBinary (/)  e1 e2
   where
     applyBinary
-      :: (Identifiable t2)
+      :: (Typeable t2)
       => (t2 -> t2 -> t3)
       -> TypedExp t2 v
       -> TypedExp t2 v
       -> Either ExpressionError t3
     applyBinary op e1 e2 = op <$> eval e1 <*> eval e2
     eval
-      :: (Identifiable t1)
+      :: (Typeable t1)
       => TypedExp t1 v -> Either ExpressionError t1
     eval = evaluateExpression bindings
 
