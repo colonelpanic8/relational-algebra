@@ -28,6 +28,7 @@ import           Data.Either
 import           Data.List
 import           Data.List.Split
 import           Data.Maybe
+import qualified Pipes.Prelude as Plude
 import qualified Data.Set as S
 import           Data.Typeable
 import           Debug.Trace
@@ -235,13 +236,17 @@ relationToRowProducer reqs rel =
               in nameRow
             nameRow1 = nameRowScoped producer1 scope1
             nameRow2 = nameRowScoped producer2 scope2
-            handleRowPair row1 = do
-              let innerBody row2 =
-                    let combined = nameRow1 row1 ++ nameRow2 row2
-                    in case evaluateExpression combined pred of
-                         Right b -> if b then yield $ row1 ++ row2 else discard () -- XXX: ...
-              for (rowProducer producer2) innerBody
-            thisProducer = for (rowProducer producer1) handleRowPair
+            thisProducer = do
+              -- All of the second table has to be loaded in to memory in this
+              -- case.
+              rows <- lift $ Plude.toListM (rowProducer producer2)
+              let handleRowPair row1 = do
+                    let innerBody row2 =
+                          let combined = nameRow1 row1 ++ nameRow2 row2
+                          in case evaluateExpression combined pred of
+                               Right b -> if b then yield $ row1 ++ row2 else discard () -- XXX: ...
+                    mapM_ innerBody $ rows
+              for (rowProducer producer1) handleRowPair
             makeScopedTypes namedTypes scope =
               let addScope (n, t) = (combineName (scope, n), t) in
               map addScope namedTypes

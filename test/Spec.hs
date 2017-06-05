@@ -19,24 +19,24 @@ main = hspec $ do
 
   describe "execute" $ do
 
-    -- it "can select a table" $ do
-    --   execute selectTable "output_people.csv"
-    --   "output_people.csv" `shouldHaveSameContentAs` "data/people.csv"
+    it "can select a table" $ do
+      execute selectTable "output_people.csv"
+      "output_people.csv" `shouldHaveSameContentAs` "data/people.csv"
 
     it "performs joins correctly" $ do
       execute selectJoin "output_join.csv"
       "output_join.csv" `shouldHaveSameContentAs` "data/expected_output_join.csv"
 
-    -- it "performs filtering and comparisons correctly" $ do
-    --   execute selectName "output_name.csv"
-    --   "output_name.csv" `shouldHaveSameContentAs` "data/expected_output_name.csv"
+    it "performs filtering and comparisons correctly" $ do
+      execute selectName "output_name.csv"
+      "output_name.csv" `shouldHaveSameContentAs` "data/expected_output_name.csv"
 
-    -- it "performs unions correctly" $ do
-    --   execute selectJoinUnion "output_name2.csv"
-    --   "output_name2.csv" `shouldHaveSameContentAs` "data/expected_output_union_join.csv"
+    it "performs unions correctly" $ do
+      execute selectJoinUnion "output_name2.csv"
+      "output_name2.csv" `shouldHaveSameContentAs` "data/expected_output_union_join.csv"
 
-    -- it "handles type errors" $ do
-    --   execute selectAdditionAndTypeErrors "mismatch_output.csv"
+    it "handles type errors" $ do
+      execute selectAdditionAndTypeErrors "mismatch_output.csv" `shouldThrow` anyException
 
 selectTable :: SelectIdentifier
 selectTable = SELECT (TABLE "data/people.csv")

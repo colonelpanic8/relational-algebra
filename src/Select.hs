@@ -12,6 +12,7 @@ ASTs for Selects
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Select
   ( Select(..)
@@ -20,6 +21,7 @@ module Select
   , trim
   ) where
 
+import           Blaze.ByteString.Builder (toByteString, fromByteString)
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Identity
@@ -30,6 +32,7 @@ import           Data.Dynamic
 import           Data.List
 import           Data.List.Split
 import           Data.Maybe
+import           Data.Monoid ((<>))
 import           Data.Proxy
 import           Data.Typeable
 import qualified Data.Vector as V
@@ -37,7 +40,8 @@ import           Debug.Trace
 import           Pipes hiding (Proxy)
 import qualified Pipes.ByteString as PBS
 import           Pipes.Csv
-import           Pipes.Prelude (toList)
+import           Pipes.Csv.Encoding
+import qualified Pipes.Prelude as P
 import           System.IO
 import           Text.CSV
 import           Text.Read
@@ -57,6 +61,9 @@ trim :: String -> String
 trim = f . f
 f = reverse . dropWhile isSpace
 
+myEncode opts = P.map (helper (encDelimiter opts) . toRecord)
+  where helper d = toByteString . (<> fromByteString "\n") . encodeRecord d
+
 -- | `execute` should take in a Select AST and a CSV filename for output
 -- and execute the select statement to create a new tabular dataset which
 -- it will populate the output file with
@@ -70,7 +77,7 @@ execute (SELECT rel) output =
     let Right producer = relationToRowProducer [] converted
         consumer = PBS.toHandle outputHandle
         header = intercalate "," $ map fst $ columnTypes producer
-        encoder = encodeWith defaultEncodeOptions { CSV.encUseCrLf = False }
+        encoder = myEncode defaultEncodeOptions
     hPutStr outputHandle $ header ++ "\n"
     runEffect $ rowProducer producer >-> encoder >-> consumer
     return ()
@@ -105,7 +112,7 @@ instance BuildsRowProducer (StreamingTable String) IO String where
             else maybe (Left $ BadValueError s) Right $ readValue tr s
         typeRow row = zipWithM tryRead types row
         handleCSVRow eRow =
-          case trace (show eRow) eRow of
+          case eRow of
             Right row ->
               case typeRow row of
                 Right typedRow -> yield typedRow

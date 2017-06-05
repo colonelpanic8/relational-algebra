@@ -14,10 +14,12 @@ library
                        Select.Relation
                        Select.Expression
   build-depends:       base >= 4.7 && < 5
+                     , blaze-builder
                      , bytestring
                      , cassava
                      , containers
                      , csv
+                     , either
                      , errors
                      , mtl
                      , pipes
