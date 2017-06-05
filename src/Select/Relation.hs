@@ -185,7 +185,9 @@ relationToRowProducer
   -> Either RelationError (TypedRowProducer m v)
 relationToRowProducer reqs rel =
   case rel of
+
     TABLE t -> getRowProducer t reqs
+
     FROM exps rel ->
       do
         newColumnTypes <- checkRequirements reqs exps
@@ -206,6 +208,7 @@ relationToRowProducer reqs rel =
                  { columnTypes = newColumnTypes
                  , rowProducer = thisProducer
                  }
+
     WHERE rel pred ->
       do
         predReqs <- getTypeRequirements (Expression pred)
@@ -218,6 +221,7 @@ relationToRowProducer reqs rel =
                 Left _ -> undefined -- XXX: hmm what to do here
             thisProducer = for (rowProducer typedProducer) handleRow
         return typedProducer { rowProducer = thisProducer }
+
     INNER_JOIN_ON (AS rel1 scope1) (AS rel2 scope2) pred ->
       do
         predReqs <- getTypeRequirements (Expression pred)
@@ -255,6 +259,7 @@ relationToRowProducer reqs rel =
         return TypedRowProducer { rowProducer = thisProducer
                                 , columnTypes = newColumnTypes
                                 }
+
     UNION rel1 rel2 -> do
       producer1 <- relationToRowProducer reqs rel1
       producer2 <- relationToRowProducer reqs rel2
