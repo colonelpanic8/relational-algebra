@@ -235,12 +235,12 @@ relationToRowProducer reqs rel =
               in nameRow
             nameRow1 = nameRowScoped producer1 scope1
             nameRow2 = nameRowScoped producer2 scope2
-            handleRowPair row1 =
+            handleRowPair row1 = do
               let innerBody row2 =
                     let combined = nameRow1 row1 ++ nameRow2 row2
                     in case evaluateExpression combined pred of
                          Right b -> if b then yield $ row1 ++ row2 else discard () -- XXX: ...
-              in for (rowProducer producer2) innerBody
+              for (rowProducer producer2) innerBody
             thisProducer = for (rowProducer producer1) handleRowPair
             makeScopedTypes namedTypes scope =
               let addScope (n, t) = (combineName (scope, n), t) in

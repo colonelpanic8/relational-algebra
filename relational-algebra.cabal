@@ -14,11 +14,17 @@ library
                        Select.Relation
                        Select.Expression
   build-depends:       base >= 4.7 && < 5
+                     , bytestring
+                     , cassava
                      , containers
                      , csv
+                     , errors
                      , mtl
                      , pipes
+                     , pipes-bytestring
+                     , pipes-csv
                      , split
+                     , vector
   default-language:    Haskell2010
 
 test-suite relational-algebra-test
