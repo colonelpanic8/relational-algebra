@@ -23,9 +23,12 @@ module Select.Expression
   ( As
   , Expression(..)
   , ExpressionError(..)
-  , Typeable(..)
   , Named(..)
+  , STypeRep(..)
+  , STypeable
+  , Typeable(..)
   , TypedExp(..)
+  , Value(..)
   , as
   , bColumn
   , colBool
@@ -33,13 +36,19 @@ module Select.Expression
   , colReal
   , colString
   , evaluateExpression
+  , fromValue
   , iColumn
   , rColumn
+  , readValue
   , sColumn
+  , stringSType
+  , stringType
   , typeOfTypedExp
+  , sTypeOf
+  , writeValue
   ) where
 
-import Data.Dynamic
+import Control.Error.Safe
 import Data.Maybe
 import Data.Proxy
 import Data.Typeable
@@ -48,48 +57,81 @@ import System.IO.Unsafe
 import Text.Read
 import Unsafe.Coerce
 
-data Expression v = forall t. Typeable t => Expression (TypedExp t v)
+class (Read t, Show t, Eq t, Typeable t) => STypeable t
+data STypeRep = forall t. STypeable t => STypeRep (Proxy t)
+data Value = forall t. STypeable t => Value t
+data Expression v = forall t. STypeable t => Expression (TypedExp t v)
 
-typeOfTypedExp :: forall t v. Typeable t => TypedExp t v -> TypeRep
-typeOfTypedExp _ = typeRep (Proxy :: Proxy t)
+instance Show Value where
+  show (Value v) = show v
 
-substitute
-  :: Typeable t
-  => TypedExp t v -> Dynamic -> Either ExpressionError t
-substitute _ dyn =
-  maybe (Left TypeError) Right $ fromDynamic dyn
+instance Eq STypeRep where
+  (STypeRep p1) == (STypeRep p2) = typeRep p1 == typeRep p2
+
+instance Eq Value where
+  (Value v) == v2 = Just v == (fromValue v2)
+
+instance STypeable String
+instance STypeable Int
+instance STypeable Double
+instance STypeable Bool
+
+sTypeOf :: forall v. STypeable v => v -> STypeRep
+sTypeOf _ = STypeRep (Proxy :: Proxy v)
+
+readValue :: STypeRep -> String -> Maybe Value
+readValue (STypeRep p) s =
+  helper p
+  where helper :: forall t. STypeable t => Proxy t -> Maybe Value
+        helper _ = Value <$> (readMaybe s :: Maybe t)
+
+stringSType = STypeRep (Proxy :: Proxy String)
+stringType = typeRep (Proxy :: Proxy String)
+
+writeValue :: Value -> String
+writeValue v@(Value t) =
+  fromMaybe (show t) $ fromValue v
+
+fromValue :: forall t. STypeable t => Value -> Maybe t
+fromValue (Value v) =
+  if typeOf v == typeRep (Proxy :: Proxy t) then
+    Just $ unsafeCoerce v
+  else
+    Nothing
+
+typeOfTypedExp :: forall t v. STypeable t => TypedExp t v -> STypeRep
+typeOfTypedExp _ = STypeRep (Proxy :: Proxy t)
 
 data ExpressionError = TypeError | BindingError deriving Show
 
 data TypedExp t v where
-  Literal :: Typeable t => t -> TypedExp t v
-  Column :: Typeable t => v -> TypedExp t v
+  Literal :: STypeable t => t -> TypedExp t v
+  Column :: STypeable t => v -> TypedExp t v
   Not :: TypedExp Bool v -> TypedExp Bool v
   And :: TypedExp Bool v -> TypedExp Bool v -> TypedExp Bool v
   Or  :: TypedExp Bool v -> TypedExp Bool v -> TypedExp Bool v
-  Equ :: (Typeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Neq :: (Typeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Gt  :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Gte :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Lt  :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Lte :: (Typeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Neg :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v
-  Add :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Sub :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Mul :: (Typeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Div :: (Typeable t, Fractional t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Mod :: (Typeable t, Integral t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Equ :: (STypeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Neq :: (STypeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Gt  :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Gte :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Lt  :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Lte :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
+  Neg :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v
+  Add :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Sub :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Mul :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Div :: (STypeable t, Fractional t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+  Mod :: (STypeable t, Integral t) => TypedExp t v -> TypedExp t v -> TypedExp t v
 
 evaluateExpression
-  :: forall v t. (Typeable t, Eq v, Show v)
-  => [(v, Dynamic)] -> TypedExp t v -> Either ExpressionError t
+  :: forall v t. (STypeable t, Eq v, Show v)
+  => [(v, Value)] -> TypedExp t v -> Either ExpressionError t
 evaluateExpression bindings expr =
   case expr of
     Literal v -> Right v
-    c@(Column name) ->
-      let mValue = lookup name bindings
-          evaluated = substitute c <$> mValue
-      in fromMaybe (Left BindingError) evaluated
+    c@(Column name) -> do
+      binding <- justErr BindingError $ lookup name bindings
+      justErr TypeError $ fromValue binding
     Not e1 -> not <$> eval e1
     Neg e1 -> negate <$> eval e1
     And e1 e2 -> applyBinary (&&) e1 e2
@@ -107,14 +149,14 @@ evaluateExpression bindings expr =
     Div e1 e2 -> applyBinary (/)  e1 e2
   where
     applyBinary
-      :: (Typeable t2)
+      :: (STypeable t2)
       => (t2 -> t2 -> t3)
       -> TypedExp t2 v
       -> TypedExp t2 v
       -> Either ExpressionError t3
     applyBinary op e1 e2 = op <$> eval e1 <*> eval e2
     eval
-      :: (Typeable t1)
+      :: (STypeable t1)
       => TypedExp t1 v -> Either ExpressionError t1
     eval = evaluateExpression bindings
 

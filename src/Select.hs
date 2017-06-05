@@ -75,8 +75,7 @@ execute (SELECT rel) output = do
   case p of
     Right producer -> do
       let finalTable = toList $ rowProducer producer
-          printValue dyn = fromMaybe (show dyn) $ fromDynamic dyn
-          csvObj = (map fst $ columnTypes producer):map (map writeDynamic) finalTable
+          csvObj = (map fst $ columnTypes producer):map (map writeValue) finalTable
           makeLine = intercalate ","
           csvString = intercalate "\n" $ map makeLine csvObj
       -- writeFile output $ show finalTable
@@ -84,42 +83,20 @@ execute (SELECT rel) output = do
     Left e -> writeFile output $ show e
   return ()
 
-readDynamic :: TypeRep -> String -> Maybe Dynamic
-readDynamic t s
-  | t == stringType = Just $ toDyn s
-  | t == intType = toDyn <$> (readMaybe s :: Maybe Int)
-  | t == realType = toDyn <$> (readMaybe s :: Maybe Double)
-  | t == boolType = toDyn <$> (readMaybe s :: Maybe Bool)
-  | otherwise = Nothing
-
-writeDynamic :: Dynamic -> String
-writeDynamic d =
-  fromMaybe "" $ (helper $ dynTypeRep d)
-  where helper t
-          | t == stringType = fromDynamic d
-          | t == intType = show <$> (fromDynamic d :: Maybe Int)
-          | t == realType = show <$> (fromDynamic d :: Maybe Double)
-          | t == boolType = show <$> (fromDynamic d :: Maybe Bool)
-          | otherwise = Nothing
-
 data CSVTable = CSVTable [[String]]
-stringType = typeRep (Proxy :: Proxy String)
-intType = typeRep (Proxy :: Proxy Int)
-realType = typeRep (Proxy :: Proxy Double)
-boolType = typeRep (Proxy :: Proxy Bool)
 
 instance BuildsRowProducer CSVTable Identity String where
   getRowProducer (CSVTable table) reqs =
     let actualNames = head table
         requiredNames = map fst reqs
-        getTypeForName name = fromMaybe stringType $ lookup name reqs
+        getTypeForName name = fromMaybe stringSType $ lookup name reqs
         getPairForName name = (name, getTypeForName name)
         typedNames = map getPairForName actualNames
         types = map snd typedNames
         tryRead tr s =
-          if tr == stringType
-            then Right $ toDyn s
-            else maybe (Left $ BadValueError s) Right $ readDynamic tr s
+          if tr == stringSType
+            then Right $ Value s
+            else maybe (Left $ BadValueError s) Right $ readValue tr s
         typeRow row = zipWithM tryRead types row
         typedTableOrError = mapM typeRow $ tail table
         makeProducer valueTable =

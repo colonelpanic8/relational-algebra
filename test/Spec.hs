@@ -1,5 +1,8 @@
 module Main (main) where
 
+import Data.Proxy
+import Debug.Trace
+import Data.Typeable
 import Select
 import Select.Expression
 import Select.Relation
@@ -7,7 +10,12 @@ import System.IO
 import Test.Hspec
 
 main :: IO ()
-main = hspec $
+main = hspec $ do
+  describe "Value" $ do
+
+    it "Can read properly" $ do
+      let val = readValue (sTypeOf True) "True"
+      val `shouldBe` val
 
   describe "execute" $ do
 

@@ -24,7 +24,6 @@ Relations
 module Select.Relation where
 
 import           Control.Monad
-import           Data.Dynamic
 import           Data.Either
 import           Data.List
 import           Data.List.Split
@@ -81,7 +80,7 @@ data RelationError
   | BadValueError String
     deriving Show
 
-type TypeRequirement = TypeRep
+type TypeRequirement = STypeRep
 type TypeRequirements v = [(v, TypeRequirement)]
 
 getReqsFromExprs
@@ -111,12 +110,11 @@ getTypeRequirements (Expression te) =
     Neg e1 -> getTypeRequirements $ Expression e1
   where
     getReqs
-      :: (Eq v, Typeable t)
+      :: (Eq v, STypeable t)
       => TypedExp t v
       -> TypedExp t v
       -> Either RelationError (TypeRequirements v)
     getReqs e1 e2 = getReqsFromExprs [Expression e1, Expression e2]
-
 
 mergeTypeRequirements
   :: Eq v
@@ -140,8 +138,8 @@ checkRequirements reqs exps =
         expToReq (AS (Expression te) name) = (name, typeOfTypedExp te)
 
 data TypedRowProducer m v
-  = TypedRowProducer { columnTypes :: [(v, TypeRep)]
-                     , rowProducer :: Producer [Dynamic] m ()
+  = TypedRowProducer { columnTypes :: TypeRequirements v
+                     , rowProducer :: Producer [Value] m ()
                      }
 
 nameRow typedProducer =
@@ -198,7 +196,7 @@ relationToRowProducer reqs rel =
             handleRow row =
               let namedRow = rowNamer row
                   eval (Expression te) =
-                    case toDyn <$> evaluateExpression namedRow te of
+                    case Value <$> evaluateExpression namedRow te of
                       Left _ -> undefined -- XXX: this should never happen
                       Right v -> v
               in yield $ map eval unnamed
@@ -259,7 +257,9 @@ relationToRowProducer reqs rel =
           columns2 = columnTypes producer2
           permutation = catMaybes $ map (flip elemIndex columns2) columns1
           equalAsSets = all (flip elem columns1) columns2 &&
-                        length columns1 == length columns2 -- No sorting or hasing so this is the only way... this should be small anyway
+                        -- XXX: No sorting or hashing so this is the only way...
+                        -- this should be small anyway
+                        length columns1 == length columns2
           permuteRow row = yield $ map (row !!) permutation
       if equalAsSets then
         return producer1 { rowProducer = rowProducer producer1 >>
