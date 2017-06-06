@@ -9,9 +9,6 @@ Portability : POSIX
 Data types used for SQL expressions
 -}
 
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -23,6 +20,7 @@ Data types used for SQL expressions
 module Select.TypedExp
   ( AnyExpression(..)
   , As
+  , BinaryBuilder
   , Expression(..)
   , ExpressionError(..)
   , Named(..)
@@ -52,6 +50,7 @@ import Control.Error.Safe
 import Data.Maybe
 import Data.Proxy
 import Data.Typeable
+import Select.Expression (Named(..), As)
 import Text.Read
 import Unsafe.Coerce
 
@@ -89,7 +88,9 @@ readValue (STypeRep p) s =
   where helper :: forall t. STypeable t => Proxy t -> Maybe Value
         helper _ = Value <$> (readMaybe s :: Maybe t)
 
+stringSType :: STypeRep
 stringSType = STypeRep (Proxy :: Proxy String)
+stringType :: TypeRep
 stringType = typeRep (Proxy :: Proxy String)
 
 writeValue :: Value -> String
@@ -129,6 +130,8 @@ data Expression t v where
   Div :: (STypeable t, Fractional t) => Expression t v -> Expression t v -> Expression t v
   Mod :: (STypeable t, Integral t) => Expression t v -> Expression t v -> Expression t v
 
+type BinaryBuilder t rt v = (Expression t v -> Expression t v -> Expression rt v)
+
 evaluateExpression
   :: forall v t. (STypeable t, Eq v, Show v)
   => [(v, Value)] -> Expression t v -> Either (ExpressionError v) t
@@ -166,20 +169,6 @@ evaluateExpression bindings expr =
       => Expression t1 v -> Either (ExpressionError v) t1
     eval = evaluateExpression bindings
 
--- | `Named` used for naming objects and bringing them into scope
-data Named scope x = AS x scope
-  deriving
-    ( Read
-    , Show
-    , Eq
-    , Functor
-    , Foldable
-    , Traversable
-    )
-
--- | `As` is `Named` with type variables flipped
-type As x scope = Named scope x
-
 as ::
   STypeable t =>
   Expression t v -> scope -> Named scope (AnyExpression v)
@@ -193,7 +182,11 @@ bColumn :: t -> Expression Bool t
 bColumn = Column
 rColumn :: t -> Expression Double t
 rColumn = Column
+colString :: v -> AnyExpression v
 colString = AnyExpression . sColumn
+colBool :: v -> AnyExpression v
 colBool = AnyExpression . bColumn
+colReal :: v -> AnyExpression v
 colReal = AnyExpression . rColumn
+colInt :: v -> AnyExpression v
 colInt = AnyExpression . iColumn

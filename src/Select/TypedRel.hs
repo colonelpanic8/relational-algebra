@@ -23,16 +23,18 @@ Relations
 -- TODO: Add export list
 module Select.TypedRel where
 
+import           Control.Error.Safe
+import           Control.Exception
 import           Control.Monad
 import           Data.Either
 import           Data.List
 import           Data.List.Split
 import           Data.Maybe
-import qualified Pipes.Prelude as Plude
 import qualified Data.Set as S
 import           Data.Typeable
 import           Debug.Trace
 import           Pipes
+import qualified Pipes.Prelude as Plude
 import           Text.Printf
 
 import           Select.TypedExp
@@ -180,6 +182,12 @@ groupReqs reqs =
         unscope req = (snd $ fst req, snd req)
         unscopeGroup agroup = (fst $ fst $ head agroup, map unscope agroup)
 
+data UnexpectedExpressionError =
+  UnexpectedExpressionError
+  deriving (Show, Typeable)
+
+instance Exception UnexpectedExpressionError
+
 relationToRowProducer
   :: (BuildsRowProducer t m v, Eq v, Ord v, Show v, NameCombine v)
   => TypeRequirements v
@@ -220,16 +228,13 @@ relationToRowProducer reqs rel =
             handleRow row =
               case evaluateExpression (rowNamer row) pred of
                 Right b -> if b then yield row else discard row
-                Left _ -> undefined -- XXX: hmm what to do here
+                Left _ -> throw UnexpectedExpressionError
             thisProducer = for (rowProducer typedProducer) handleRow
         return typedProducer { rowProducer = thisProducer }
 
     INNER_JOIN_ON (AS rel1 scope1) (AS rel2 scope2) pred ->
       do
-        if not (allowedScope scope1 && allowedScope scope2) then
-          Left InvalidScopeError
-        else
-          return ()
+        assertErr InvalidScopeError $ allowedScope scope1 && allowedScope scope2
         predReqs <- getTypeRequirements (AnyExpression pred)
         -- TODO: make sure splits are okay
         let reqPairs = splitRequirements reqs ++ predReqs
