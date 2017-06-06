@@ -21,7 +21,7 @@ Relations
 {-# LANGUAGE TupleSections #-}
 
 -- TODO: Add export list
-module Select.Relation where
+module Select.TypedRel where
 
 import           Control.Monad
 import           Data.Either

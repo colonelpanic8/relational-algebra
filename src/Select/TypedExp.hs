@@ -20,14 +20,14 @@ Data types used for SQL expressions
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
-module Select.Expression
-  ( As
+module Select.TypedExp
+  ( AnyExpression(..)
+  , As
   , Expression(..)
   , ExpressionError(..)
   , Named(..)
   , STypeRep(..)
   , STypeable
-  , AnyExpression(..)
   , Value(..)
   , as
   , bColumn
@@ -41,10 +41,10 @@ module Select.Expression
   , rColumn
   , readValue
   , sColumn
+  , sTypeOf
   , stringSType
   , stringType
   , typeOfExpression
-  , sTypeOf
   , writeValue
   ) where
 
@@ -58,7 +58,7 @@ import Unsafe.Coerce
 class (Read t, Show t, Eq t, Typeable t) => STypeable t
 data STypeRep = forall t. STypeable t => STypeRep (Proxy t)
 data Value = forall t. STypeable t => Value t
-data AnyExpression v = forall t. STypeable t => Expression (Expression t v)
+data AnyExpression v = forall t. STypeable t => AnyExpression (Expression t v)
 
 instance Show STypeRep where
   show (STypeRep p) = showProxy p
@@ -183,7 +183,7 @@ type As x scope = Named scope x
 as ::
   STypeable t =>
   Expression t v -> scope -> Named scope (AnyExpression v)
-as x = AS (Expression x)
+as x = AS (AnyExpression x)
 
 sColumn :: t -> Expression String t
 sColumn = Column
@@ -193,7 +193,7 @@ bColumn :: t -> Expression Bool t
 bColumn = Column
 rColumn :: t -> Expression Double t
 rColumn = Column
-colString = Expression . sColumn
-colBool = Expression . bColumn
-colReal = Expression . rColumn
-colInt = Expression . iColumn
+colString = AnyExpression . sColumn
+colBool = AnyExpression . bColumn
+colReal = AnyExpression . rColumn
+colInt = AnyExpression . iColumn

@@ -4,8 +4,8 @@ import Data.Proxy
 import Debug.Trace
 import Data.Typeable
 import Select
-import Select.Expression
-import Select.Relation
+import Select.TypedExp
+import Select.TypedRel
 import System.IO
 import Test.Hspec
 

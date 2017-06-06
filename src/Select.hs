@@ -47,8 +47,8 @@ import           Text.CSV
 import           Text.Read
 import           Unsafe.Coerce
 
-import           Select.Expression
-import           Select.Relation
+import           Select.TypedExp
+import           Select.TypedRel
 
 -- | Top level `Select` AST
 newtype Select scope variable table
