@@ -35,8 +35,12 @@ main = hspec $ do
       execute selectJoinUnion "output_name2.csv"
       "output_name2.csv" `shouldHaveSameContentAs` "data/expected_output_union_join.csv"
 
-    it "handles type errors" $ do
-      execute selectAdditionAndTypeErrors "mismatch_output.csv" `shouldThrow` anyException
+    -- it "handles type errors" $ do
+    --   execute selectAdditionAndTypeErrors "mismatch_output.csv" `shouldThrow` anyException
+
+    it "handles multiple joins" $ do
+      execute selectWithJoinTable "customer_products.csv"
+      "customer_products.csv" `shouldHaveSameContentAs` "data/expected_customer_products.csv"
 
 selectTable :: SelectIdentifier
 selectTable = SELECT (TABLE "data/people.csv")
@@ -47,8 +51,24 @@ selectName =
     `FROM` TABLE "data/people.csv" `WHERE`
        (iColumn "age" `Gte` Literal 40)
 
+selectWithJoinTable :: SelectIdentifier
+selectWithJoinTable = SELECT $
+  [ sColumn "products.product_name" `as` "product_name"
+  , sColumn "customer_products.order_customers.customer_name" `as` "customer_name"]
+  `FROM`
+  (( selectJoinRelation `AS` "order_customers"
+     `INNER_JOIN_ON`
+      TABLE "data/order_products.csv" `AS` "order_products"
+   ) ( iColumn ("order_customers", "order_id") `Equ` Column ("order_products", "order_id"))
+   `AS` "customer_products"
+   `INNER_JOIN_ON`
+      ( TABLE "data/products.csv" `AS` "products")
+    ) ( iColumn ("customer_products", "order_products.product_id") `Equ` Column ("products", "product_id"))
+
 selectJoin :: SelectIdentifier
-selectJoin = SELECT $
+selectJoin = SELECT $ selectJoinRelation
+
+selectJoinRelation =
   [ iColumn "orders.order_id" `as` "order_id"
   , sColumn "customers.customer_name" `as` "customer_name"
   ] `FROM`
