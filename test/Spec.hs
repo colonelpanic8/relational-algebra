@@ -52,18 +52,21 @@ selectName =
        (iColumn "age" `Gte` Literal 40)
 
 selectWithJoinTable :: SelectIdentifier
-selectWithJoinTable = SELECT $
+selectWithJoinTable =
+  SELECT $
   [ sColumn "products.product_name" `as` "product_name"
-  , sColumn "customer_products.order_customers.customer_name" `as` "customer_name"]
-  `FROM`
-  (( selectJoinRelation `AS` "order_customers"
-     `INNER_JOIN_ON`
-      TABLE "data/order_products.csv" `AS` "order_products"
-   ) ( iColumn ("order_customers", "order_id") `Equ` Column ("order_products", "order_id"))
-   `AS` "customer_products"
-   `INNER_JOIN_ON`
-      ( TABLE "data/products.csv" `AS` "products")
-    ) ( iColumn ("customer_products", "order_products.product_id") `Equ` Column ("products", "product_id"))
+  , sColumn "customer_products.order_customers.customer_name" `as`
+    "customer_name"
+  ] `FROM`
+  ((selectJoinRelation `AS` "order_customers" `INNER_JOIN_ON`
+    TABLE "data/order_products.csv" `AS`
+    "order_products")
+     (iColumn ("order_customers", "order_id") `Equ`
+      Column ("order_products", "order_id")) `AS`
+   "customer_products" `INNER_JOIN_ON`
+   (TABLE "data/products.csv" `AS` "products"))
+    (iColumn ("customer_products", "order_products.product_id") `Equ`
+     Column ("products", "product_id"))
 
 selectJoin :: SelectIdentifier
 selectJoin = SELECT $ selectJoinRelation
