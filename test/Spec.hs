@@ -35,8 +35,8 @@ main = hspec $ do
       execute selectJoinUnion "output_name2.csv"
       "output_name2.csv" `shouldHaveSameContentAs` "data/expected_output_union_join.csv"
 
-    -- it "handles type errors" $ do
-    --   execute selectAdditionAndTypeErrors "mismatch_output.csv" `shouldThrow` anyException
+    it "handles type errors" $ do
+      execute selectAdditionAndTypeErrors "mismatch_output.csv" `shouldThrow` anyException
 
     it "handles multiple joins" $ do
       execute selectWithJoinTable "customer_products.csv"
