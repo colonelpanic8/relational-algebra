@@ -78,6 +78,7 @@ data RelationError
   | ConflictingTypeError
   | UnknownColumnError
   | UnmatchedUnion
+  | InvalidScopeError
   | BadValueError String
     deriving Show
 
@@ -156,30 +157,31 @@ class (Eq v, Monad m) => BuildsRowProducer t m v where
     -> (Either RelationError (TypedRowProducer m v))
 
 class NameCombine n where
-  -- Law is combine . split = id when okayToSplit n
+  -- Law is combine . split = id when allowedScope
   combineName :: (n, n) -> n
   splitName :: n -> (n, n)
-  okayToSplit :: n -> Bool
+  allowedScope :: n -> Bool
 
 instance NameCombine String where
   combineName (a, b) = printf "%s.%s" a b
   splitName name =
     let nameList = splitOn "." name
-    in (head nameList, head $ tail nameList)
-  okayToSplit n = length (filter (== '.') n) == 1
+    in (head nameList, intercalate "." $ tail nameList)
+  allowedScope n = not $ elem '.' n
 
 splitRequirements reqs =
   map helper reqs
   where helper (name, t) = (splitName name, t)
 
 groupReqs reqs =
-  map unscopeGroup $ groupBy shouldGroup reqs
+  map unscopeGroup $ groupBy shouldGroup sorted
   where shouldGroup ((s1, _), _) ((s2, _), _) = s1 == s2
+        sorted = sortBy (\a b -> compare (fst a) $ fst b) reqs
         unscope req = (snd $ fst req, snd req)
         unscopeGroup agroup = (fst $ fst $ head agroup, map unscope agroup)
 
 relationToRowProducer
-  :: (BuildsRowProducer t m v, Eq v, Show v, NameCombine v)
+  :: (BuildsRowProducer t m v, Eq v, Ord v, Show v, NameCombine v)
   => TypeRequirements v
   -> Relation v v t
   -> Either RelationError (TypedRowProducer m v)
@@ -224,6 +226,10 @@ relationToRowProducer reqs rel =
 
     INNER_JOIN_ON (AS rel1 scope1) (AS rel2 scope2) pred ->
       do
+        if not (allowedScope scope1 && allowedScope scope2) then
+          Left InvalidScopeError
+        else
+          return ()
         predReqs <- getTypeRequirements (AnyExpression pred)
         -- TODO: make sure splits are okay
         let reqPairs = splitRequirements reqs ++ predReqs
@@ -248,7 +254,8 @@ relationToRowProducer reqs rel =
                     let innerBody row2 =
                           let combined = nameRow1 row1 ++ nameRow2 row2
                           in case evaluateExpression combined pred of
-                               Right b -> if b then yield $ row1 ++ row2 else discard () -- XXX: ...
+                               Right b -> if b then yield $ row1 ++ row2 else discard combined
+                               Left e -> trace (show e) $ discard combined
                     mapM_ innerBody $ rows
               for (rowProducer producer1) handleRowPair
             makeScopedTypes namedTypes scope =

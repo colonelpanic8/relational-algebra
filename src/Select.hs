@@ -74,7 +74,11 @@ execute
 execute (SELECT rel) output =
   withFile output WriteMode $ \outputHandle -> do
     converted <- convertRelation filepathToStreamingTable rel
-    let Right producer = relationToRowProducer [] converted
+    let p = relationToRowProducer [] converted
+    case p of
+      Left e -> trace (show e) $ return ()
+      Right _ -> return ()
+    let Right producer = p
         consumer = PBS.toHandle outputHandle
         header = intercalate "," $ map fst $ columnTypes producer
         encoder = myEncode defaultEncodeOptions

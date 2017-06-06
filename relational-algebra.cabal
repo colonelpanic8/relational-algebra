@@ -13,6 +13,8 @@ library
   exposed-modules:     Select
                        Select.Relation
                        Select.Expression
+                       Select.TypedRel
+                       Select.TypedExp
   build-depends:       base >= 4.7 && < 5
                      , blaze-builder
                      , bytestring
