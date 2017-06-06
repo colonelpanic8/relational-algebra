@@ -35,7 +35,7 @@ import           Debug.Trace
 import           Pipes
 import           Text.Printf
 
-import           Select.Expression
+import           Select.TypedExp
 
 infix 1 `FROM`
 infixr 2 `UNION`
@@ -49,16 +49,16 @@ type RelationIdentifier = Relation String String FilePath
 data Relation scope variable table
   = TABLE table
   | FROM
-    [Expression variable `As` scope] -- projection
+    [AnyExpression variable `As` scope] -- projection
     (Relation scope variable table)
   | WHERE
     (Relation scope variable table)
-    (TypedExp Bool variable) -- predicate
+    (Expression Bool variable) -- predicate
   | UNION (Relation scope variable table) (Relation scope variable table)
   | INNER_JOIN_ON
     (Relation scope variable table `As` scope)
     (Relation scope variable table `As` scope)
-    (TypedExp Bool (scope, variable))
+    (Expression Bool (scope, variable))
 
 convertRelation :: (t -> IO u) -> Relation s v t -> IO (Relation s v u)
 convertRelation convert rel =
@@ -86,15 +86,15 @@ type TypeRequirements v = [(v, TypeRequirement)]
 
 getReqsFromExprs
   :: Eq v
-  => [Expression v] -> Either RelationError (TypeRequirements v)
+  => [AnyExpression v] -> Either RelationError (TypeRequirements v)
 getReqsFromExprs exprs =
   mapM getTypeRequirements exprs >>= mergeTypeRequirements
 
-getTypeRequirements :: Eq v => Expression v -> Either RelationError (TypeRequirements v)
-getTypeRequirements (Expression te) =
+getTypeRequirements :: Eq v => AnyExpression v -> Either RelationError (TypeRequirements v)
+getTypeRequirements (AnyExpression te) =
   case te of
     Literal v -> Right []
-    c@(Column name) -> Right [(name, typeOfTypedExp c)]
+    c@(Column name) -> Right [(name, typeOfExpression c)]
     And e1 e2 -> getReqs e1 e2
     Gt  e1 e2 -> getReqs e1 e2
     Gte e1 e2 -> getReqs e1 e2
@@ -107,15 +107,15 @@ getTypeRequirements (Expression te) =
     Sub e1 e2 -> getReqs e1 e2
     Mul e1 e2 -> getReqs e1 e2
     Mod e1 e2 -> getReqs e1 e2
-    Not e1 -> getTypeRequirements $ Expression e1
-    Neg e1 -> getTypeRequirements $ Expression e1
+    Not e1 -> getTypeRequirements $ AnyExpression e1
+    Neg e1 -> getTypeRequirements $ AnyExpression e1
   where
     getReqs
       :: (Eq v, STypeable t)
-      => TypedExp t v
-      -> TypedExp t v
+      => Expression t v
+      -> Expression t v
       -> Either RelationError (TypeRequirements v)
-    getReqs e1 e2 = getReqsFromExprs [Expression e1, Expression e2]
+    getReqs e1 e2 = getReqsFromExprs [AnyExpression e1, AnyExpression e2]
 
 mergeTypeRequirements
   :: Eq v
@@ -136,7 +136,7 @@ checkRequirements reqs exps =
   then Right columnTypes
   else Left ConflictingTypeError -- TODO: this could actually be a bunch of stuff
   where columnTypes = map expToReq exps
-        expToReq (AS (Expression te) name) = (name, typeOfTypedExp te)
+        expToReq (AS (AnyExpression te) name) = (name, typeOfExpression te)
 
 data TypedRowProducer m v
   = TypedRowProducer { columnTypes :: TypeRequirements v
@@ -198,7 +198,7 @@ relationToRowProducer reqs rel =
             producerRows = rowProducer typedProducer
             handleRow row =
               let namedRow = rowNamer row
-                  eval (Expression te) =
+                  eval (AnyExpression te) =
                     case Value <$> evaluateExpression namedRow te of
                       Left _ -> undefined -- XXX: this should never happen
                       Right v -> v
@@ -211,7 +211,7 @@ relationToRowProducer reqs rel =
 
     WHERE rel pred ->
       do
-        predReqs <- getTypeRequirements (Expression pred)
+        predReqs <- getTypeRequirements (AnyExpression pred)
         merged <- mergeTypeRequirements [predReqs, reqs]
         typedProducer <- relationToRowProducer merged rel
         let rowNamer = nameRow typedProducer
@@ -224,7 +224,7 @@ relationToRowProducer reqs rel =
 
     INNER_JOIN_ON (AS rel1 scope1) (AS rel2 scope2) pred ->
       do
-        predReqs <- getTypeRequirements (Expression pred)
+        predReqs <- getTypeRequirements (AnyExpression pred)
         -- TODO: make sure splits are okay
         let reqPairs = splitRequirements reqs ++ predReqs
             grouped = groupReqs reqPairs

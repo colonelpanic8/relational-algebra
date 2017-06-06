@@ -26,8 +26,7 @@ module Select.Expression
   , Named(..)
   , STypeRep(..)
   , STypeable
-  , Typeable(..)
-  , TypedExp(..)
+  , AnyExpression(..)
   , Value(..)
   , as
   , bColumn
@@ -43,7 +42,7 @@ module Select.Expression
   , sColumn
   , stringSType
   , stringType
-  , typeOfTypedExp
+  , typeOfExpression
   , sTypeOf
   , writeValue
   ) where
@@ -52,15 +51,13 @@ import Control.Error.Safe
 import Data.Maybe
 import Data.Proxy
 import Data.Typeable
-import Data.Unique
-import System.IO.Unsafe
 import Text.Read
 import Unsafe.Coerce
 
 class (Read t, Show t, Eq t, Typeable t) => STypeable t
 data STypeRep = forall t. STypeable t => STypeRep (Proxy t)
 data Value = forall t. STypeable t => Value t
-data Expression v = forall t. STypeable t => Expression (TypedExp t v)
+data AnyExpression v = forall t. STypeable t => Expression (Expression t v)
 
 instance Show Value where
   show (Value v) = show v
@@ -69,7 +66,7 @@ instance Eq STypeRep where
   (STypeRep p1) == (STypeRep p2) = typeRep p1 == typeRep p2
 
 instance Eq Value where
-  (Value v) == v2 = Just v == (fromValue v2)
+  (Value v) == v2 = Just v == fromValue v2
 
 instance STypeable String
 instance STypeable Int
@@ -99,37 +96,37 @@ fromValue (Value v) =
   else
     Nothing
 
-typeOfTypedExp :: forall t v. STypeable t => TypedExp t v -> STypeRep
-typeOfTypedExp _ = STypeRep (Proxy :: Proxy t)
+typeOfExpression :: forall t v. STypeable t => Expression t v -> STypeRep
+typeOfExpression _ = STypeRep (Proxy :: Proxy t)
 
 data ExpressionError = TypeError | BindingError deriving Show
 
-data TypedExp t v where
-  Literal :: STypeable t => t -> TypedExp t v
-  Column :: STypeable t => v -> TypedExp t v
-  Not :: TypedExp Bool v -> TypedExp Bool v
-  And :: TypedExp Bool v -> TypedExp Bool v -> TypedExp Bool v
-  Or  :: TypedExp Bool v -> TypedExp Bool v -> TypedExp Bool v
-  Equ :: (STypeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Neq :: (STypeable t, Eq t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Gt  :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Gte :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Lt  :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Lte :: (STypeable t, Ord t) => TypedExp t v -> TypedExp t v -> TypedExp Bool v
-  Neg :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v
-  Add :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Sub :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Mul :: (STypeable t, Num t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Div :: (STypeable t, Fractional t) => TypedExp t v -> TypedExp t v -> TypedExp t v
-  Mod :: (STypeable t, Integral t) => TypedExp t v -> TypedExp t v -> TypedExp t v
+data Expression t v where
+  Literal :: STypeable t => t -> Expression t v
+  Column :: STypeable t => v -> Expression t v
+  Not :: Expression Bool v -> Expression Bool v
+  And :: Expression Bool v -> Expression Bool v -> Expression Bool v
+  Or  :: Expression Bool v -> Expression Bool v -> Expression Bool v
+  Equ :: (STypeable t, Eq t) => Expression t v -> Expression t v -> Expression Bool v
+  Neq :: (STypeable t, Eq t) => Expression t v -> Expression t v -> Expression Bool v
+  Gt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+  Gte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+  Lt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+  Lte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+  Neg :: (STypeable t, Num t) => Expression t v -> Expression t v
+  Add :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
+  Sub :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
+  Mul :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
+  Div :: (STypeable t, Fractional t) => Expression t v -> Expression t v -> Expression t v
+  Mod :: (STypeable t, Integral t) => Expression t v -> Expression t v -> Expression t v
 
 evaluateExpression
   :: forall v t. (STypeable t, Eq v, Show v)
-  => [(v, Value)] -> TypedExp t v -> Either ExpressionError t
+  => [(v, Value)] -> Expression t v -> Either ExpressionError t
 evaluateExpression bindings expr =
   case expr of
     Literal v -> Right v
-    c@(Column name) -> do
+    (Column name) -> do
       binding <- justErr BindingError $ lookup name bindings
       justErr TypeError $ fromValue binding
     Not e1 -> not <$> eval e1
@@ -151,13 +148,13 @@ evaluateExpression bindings expr =
     applyBinary
       :: (STypeable t2)
       => (t2 -> t2 -> t3)
-      -> TypedExp t2 v
-      -> TypedExp t2 v
+      -> Expression t2 v
+      -> Expression t2 v
       -> Either ExpressionError t3
     applyBinary op e1 e2 = op <$> eval e1 <*> eval e2
     eval
       :: (STypeable t1)
-      => TypedExp t1 v -> Either ExpressionError t1
+      => Expression t1 v -> Either ExpressionError t1
     eval = evaluateExpression bindings
 
 -- | `Named` used for naming objects and bringing them into scope
@@ -174,16 +171,19 @@ data Named scope x = AS x scope
 -- | `As` is `Named` with type variables flipped
 type As x scope = Named scope x
 
-as x scope = AS (Expression x) scope
+as ::
+  STypeable t =>
+  Expression t v -> scope -> Named scope (AnyExpression v)
+as x = AS (Expression x)
 
-sColumn :: t -> TypedExp String t
-sColumn n = Column n
-iColumn :: t -> TypedExp Int t
-iColumn n = Column n
-bColumn :: t -> TypedExp Bool t
-bColumn n = Column n
-rColumn :: t -> TypedExp Double t
-rColumn n = Column n
+sColumn :: t -> Expression String t
+sColumn = Column
+iColumn :: t -> Expression Int t
+iColumn = Column
+bColumn :: t -> Expression Bool t
+bColumn = Column
+rColumn :: t -> Expression Double t
+rColumn = Column
 colString = Expression . sColumn
 colBool = Expression . bColumn
 colReal = Expression . rColumn
