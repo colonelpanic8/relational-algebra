@@ -18,6 +18,7 @@ Data types used for SQL expressions
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Select.Expression
   ( As
@@ -62,6 +63,12 @@ data STypeRep = forall t. STypeable t => STypeRep (Proxy t)
 data Value = forall t. STypeable t => Value t
 data Expression v = forall t. STypeable t => Expression (TypedExp t v)
 
+instance Show STypeRep where
+  show (STypeRep p) = showProxy p
+
+showProxy :: Typeable t => Proxy t -> String
+showProxy p = show $ typeRep p
+
 instance Show Value where
   show (Value v) = show v
 
@@ -102,7 +109,9 @@ fromValue (Value v) =
 typeOfTypedExp :: forall t v. STypeable t => TypedExp t v -> STypeRep
 typeOfTypedExp _ = STypeRep (Proxy :: Proxy t)
 
-data ExpressionError = TypeError | BindingError deriving Show
+data ExpressionError v = TypeError v [(v, Value)] | BindingError v [(v, Value)]
+
+deriving instance Show v => Show (ExpressionError v)
 
 data TypedExp t v where
   Literal :: STypeable t => t -> TypedExp t v
@@ -125,13 +134,13 @@ data TypedExp t v where
 
 evaluateExpression
   :: forall v t. (STypeable t, Eq v, Show v)
-  => [(v, Value)] -> TypedExp t v -> Either ExpressionError t
+  => [(v, Value)] -> TypedExp t v -> Either (ExpressionError v) t
 evaluateExpression bindings expr =
   case expr of
     Literal v -> Right v
     c@(Column name) -> do
-      binding <- justErr BindingError $ lookup name bindings
-      justErr TypeError $ fromValue binding
+      binding <- justErr (BindingError name bindings) $ lookup name bindings
+      justErr (TypeError name bindings) $ fromValue binding
     Not e1 -> not <$> eval e1
     Neg e1 -> negate <$> eval e1
     And e1 e2 -> applyBinary (&&) e1 e2
@@ -153,11 +162,11 @@ evaluateExpression bindings expr =
       => (t2 -> t2 -> t3)
       -> TypedExp t2 v
       -> TypedExp t2 v
-      -> Either ExpressionError t3
+      -> Either (ExpressionError v) t3
     applyBinary op e1 e2 = op <$> eval e1 <*> eval e2
     eval
       :: (STypeable t1)
-      => TypedExp t1 v -> Either ExpressionError t1
+      => TypedExp t1 v -> Either (ExpressionError v) t1
     eval = evaluateExpression bindings
 
 -- | `Named` used for naming objects and bringing them into scope

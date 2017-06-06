@@ -248,7 +248,8 @@ relationToRowProducer reqs rel =
                     let innerBody row2 =
                           let combined = nameRow1 row1 ++ nameRow2 row2
                           in case evaluateExpression combined pred of
-                               Right b -> if b then yield $ row1 ++ row2 else discard () -- XXX: ...
+                               Right b -> if b then yield $ row1 ++ row2 else discard combined
+                               Left e -> trace (show e) $ discard combined
                     mapM_ innerBody $ rows
               for (rowProducer producer1) handleRowPair
             makeScopedTypes namedTypes scope =
