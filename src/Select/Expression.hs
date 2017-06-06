@@ -20,6 +20,7 @@ module Select.Expression
   , As
   ) where
 
+
 -- | Untyped AST for SQL expressions
 data Expression variable
   = LiteralBool Bool

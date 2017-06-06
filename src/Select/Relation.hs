@@ -19,8 +19,8 @@ module Select.Relation
   , RelationIdentifier
   ) where
 
+import           Data.Typeable
 import           Select.Expression
-import Data.Typeable
 import qualified Select.TypedExp as TE
 import qualified Select.TypedRel as TR
 
