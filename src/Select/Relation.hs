@@ -20,6 +20,7 @@ module Select.Relation
   ) where
 
 import           Select.Expression
+import Data.Typeable
 import qualified Select.TypedExp as TE
 import qualified Select.TypedRel as TR
 
@@ -67,36 +68,36 @@ data TypeRequirement
   | RealType
     deriving (Eq, Show, Read, Typeable)
 
-data TypingError = TypingError
-type TypeRequirements v = [(v, [TypeRequirement])]
-data InferenceTable t = InferenceTable t TypeRequirements
+-- data TypingError = TypingError
+-- type TypeRequirements v = [(v, [TypeRequirement])]
+-- data InferenceTable t = InferenceTable t TypeRequirements
 
-getTypeRequirements :: Eq v => Expression v -> Either TR.RelationError (TypeRequirements v)
-getTypeRequirements exp =
-  case exp of
-    Literal v -> Right []
-    c@(Column name) -> Right [(name, typeOfExpression c)]
-    And e1 e2 -> getReqs e1 e2
-    Gt  e1 e2 -> getReqs e1 e2
-    Gte e1 e2 -> getReqs e1 e2
-    Lt  e1 e2 -> getReqs e1 e2
-    Lte e1 e2 -> getReqs e1 e2
-    Or  e1 e2 -> getReqs e1 e2
-    Equ e1 e2 -> getReqs e1 e2
-    Neq e1 e2 -> getReqs e1 e2
-    Add e1 e2 -> getReqs e1 e2
-    Sub e1 e2 -> getReqs e1 e2
-    Mul e1 e2 -> getReqs e1 e2
-    Mod e1 e2 -> getReqs e1 e2
-    Not e1 -> getTypeRequirements $ AnyExpression e1
-    Neg e1 -> getTypeRequirements $ AnyExpression e1
-  where
-    getReqs
-      :: (Eq v, STypeable t)
-      => Expression t v
-      -> Expression t v
-      -> Either RelationError (TypeRequirements v)
-    getReqs e1 e2 = getReqsFromExprs [AnyExpression e1, AnyExpression e2]
+-- getTypeRequirements :: Eq v => Expression v -> Either TR.RelationError (TypeRequirements v)
+-- getTypeRequirements exp =
+--   case exp of
+--     Literal v -> Right []
+--     c@(Column name) -> Right [(name, typeOfExpression c)]
+--     And e1 e2 -> getReqs e1 e2
+--     Gt  e1 e2 -> getReqs e1 e2
+--     Gte e1 e2 -> getReqs e1 e2
+--     Lt  e1 e2 -> getReqs e1 e2
+--     Lte e1 e2 -> getReqs e1 e2
+--     Or  e1 e2 -> getReqs e1 e2
+--     Equ e1 e2 -> getReqs e1 e2
+--     Neq e1 e2 -> getReqs e1 e2
+--     Add e1 e2 -> getReqs e1 e2
+--     Sub e1 e2 -> getReqs e1 e2
+--     Mul e1 e2 -> getReqs e1 e2
+--     Mod e1 e2 -> getReqs e1 e2
+--     Not e1 -> getTypeRequirements $ AnyExpression e1
+--     Neg e1 -> getTypeRequirements $ AnyExpression e1
+--   where
+--     getReqs
+--       :: (Eq v, STypeable t)
+--       => Expression t v
+--       -> Expression t v
+--       -> Either RelationError (TypeRequirements v)
+--     getReqs e1 e2 = getReqsFromExprs [AnyExpression e1, AnyExpression e2]
 
 
 -- applyRequirements
