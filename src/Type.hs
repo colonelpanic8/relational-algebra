@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Type where
 
@@ -8,6 +9,7 @@ import qualified Select.TypedExp as TE
 import qualified Select.TypedRel as TR
 
 import           Control.Error.Safe
+import           Data.Either
 import           Data.Proxy
 import           Unsafe.Coerce
 
@@ -20,6 +22,11 @@ getColumnOfType name (TE.STypeRep p) = helper p
          TE.STypeable t
       => Proxy t -> TE.AnyExpression v
     helper _ = TE.AnyExpression (TE.Column name :: TE.Expression t v)
+
+backup a b = if isLeft a then b else a
+
+backups [a] = a
+backups (a:as) = if isLeft a then backups as else a
 
 typeExpression
   :: forall v.
@@ -34,12 +41,45 @@ typeExpression reqs expr =
     UE.LiteralBool b -> Right $ TE.AnyExpression $ TE.Literal b
     UE.And e1 e2 -> construct TE.And e1 e2
     UE.Or e1 e2 -> construct TE.Or e1 e2
-    UE.Add e1 e2 ->
-      construct
-        (TE.Add :: TE.Expression Int v ->
-                   TE.Expression Int v ->
-                   TE.Expression Int v) e1 e2
+    UE.Add e1 e2 -> constructNumeric TE.Add e1 e2
+    UE.Equ e1 e2 -> constructOrdered TE.Equ e1 e2
+    UE.Lt e1 e2 -> constructOrdered TE.Lt e1 e2
+    UE.Not e1 -> TE.AnyExpression . TE.Not <$> (recurse e1 >>= getExpressionOfType)
+    UE.Div e1 e2 -> construct (TE.Div :: TE.BinaryBuilder Double Double v) e1 e2
   where
+    constructNumeric
+      :: (forall t. (TE.STypeable t, Num t) => TE.BinaryBuilder t t v)
+      -> UE.Expression v
+      -> UE.Expression v
+      -> Either TR.RelationError (TE.AnyExpression v)
+    constructNumeric constructor e1 e2 =
+      let intConstructor =
+            (constructor :: TE.BinaryBuilder Int Int v)
+          realConstructor =
+            (constructor :: TE.BinaryBuilder Double Double v)
+      in backup
+           (construct intConstructor e1 e2)
+           (construct realConstructor e1 e2)
+    constructOrdered
+      :: (forall t. (TE.STypeable t, Ord t) => TE.BinaryBuilder t Bool v)
+      -> UE.Expression v
+      -> UE.Expression v
+      -> Either TR.RelationError (TE.AnyExpression v)
+    constructOrdered constructor e1 e2 =
+      let intConstructor =
+            (constructor :: TE.BinaryBuilder Int Bool v)
+          realConstructor =
+            (constructor :: TE.BinaryBuilder Double Bool v)
+          boolConstructor =
+            (constructor :: TE.BinaryBuilder Bool Bool v)
+          stringConstructor =
+            (constructor :: TE.BinaryBuilder String Bool v)
+      in backups
+           [ construct intConstructor e1 e2
+           , construct realConstructor e1 e2
+           , construct boolConstructor e1 e2
+           , construct stringConstructor e1 e2
+           ]
     recurse = typeExpression reqs
     getExpressionOfType
       :: forall t.

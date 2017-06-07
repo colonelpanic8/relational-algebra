@@ -117,8 +117,8 @@ data Expression t v where
   Not :: Expression Bool v -> Expression Bool v
   And :: Expression Bool v -> Expression Bool v -> Expression Bool v
   Or  :: Expression Bool v -> Expression Bool v -> Expression Bool v
-  Equ :: (STypeable t, Eq t) => Expression t v -> Expression t v -> Expression Bool v
-  Neq :: (STypeable t, Eq t) => Expression t v -> Expression t v -> Expression Bool v
+  Equ :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
+  Neq :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
   Gt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
   Gte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
   Lt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
