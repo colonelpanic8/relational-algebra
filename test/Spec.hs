@@ -49,7 +49,7 @@ selectName :: SelectIdentifier
 selectName =
   SELECT $ [(sColumn "first_name") `as` "name"]
     `FROM` TABLE "data/people.csv" `WHERE`
-       (iColumn "age" `Gte` Literal 40)
+       (iColumn "age" `egte` Literal 40)
 
 selectWithJoinTable :: SelectIdentifier
 selectWithJoinTable =
@@ -61,11 +61,11 @@ selectWithJoinTable =
   ((selectJoinRelation `AS` "order_customers" `INNER_JOIN_ON`
     TABLE "data/order_products.csv" `AS`
     "order_products")
-     (iColumn ("order_customers", "order_id") `Equ`
+     (iColumn ("order_customers", "order_id") `eequ`
       Column ("order_products", "order_id")) `AS`
    "customer_products" `INNER_JOIN_ON`
    (TABLE "data/products.csv" `AS` "products"))
-    (iColumn ("customer_products", "order_products.product_id") `Equ`
+    (iColumn ("customer_products", "order_products.product_id") `eequ`
      Column ("products", "product_id"))
 
 selectJoin :: SelectIdentifier
@@ -78,7 +78,7 @@ selectJoinRelation =
   ( TABLE "data/orders_table.csv" `AS` "orders"
     `INNER_JOIN_ON`
     TABLE "data/customer_table.csv" `AS` "customers"
-  ) (sColumn ("orders", "customer_id") `Equ` Column ("customers", "customer_id"))
+  ) (sColumn ("orders", "customer_id") `eequ` Column ("customers", "customer_id"))
 
 selectJoinUnion :: SelectIdentifier
 selectJoinUnion = SELECT $
@@ -88,17 +88,17 @@ selectJoinUnion = SELECT $
   ( (TABLE "data/orders_table.csv" `UNION` TABLE "data/other_orders_table.csv") `AS` "orders"
     `INNER_JOIN_ON`
     TABLE "data/customer_table.csv" `AS` "customers"
-  ) (sColumn ("orders","customer_id") `Equ` Column ("customers","customer_id"))
+  ) (sColumn ("orders","customer_id") `eequ` Column ("customers","customer_id"))
 
 selectPredicateError :: SelectIdentifier
 selectPredicateError =
   SELECT $ TABLE "data/contains_type_mismatch.csv"
            `WHERE`
-           iColumn "int_column" `Add` Column "double_column" `Gt` Literal 27
+           iColumn "int_column" `eadd` Column "double_column" `egt` Literal 27
 
 selectAdditionAndTypeErrors :: SelectIdentifier
 selectAdditionAndTypeErrors = SELECT $
-  [ iColumn "int_column" `Add` Column "double_column" `as` "added" ]
+  [ iColumn "int_column" `eadd` Column "double_column" `as` "added" ]
   `FROM`
    TABLE "data/contains_type_mismatch.csv"
 

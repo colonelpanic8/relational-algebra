@@ -98,20 +98,8 @@ getTypeRequirements (AnyExpression te) =
   case te of
     Literal v -> Right []
     c@(Column name) -> Right [(name, typeOfExpression c)]
-    And e1 e2 -> getReqs e1 e2
-    Gt  e1 e2 -> getReqs e1 e2
-    Gte e1 e2 -> getReqs e1 e2
-    Lt  e1 e2 -> getReqs e1 e2
-    Lte e1 e2 -> getReqs e1 e2
-    Or  e1 e2 -> getReqs e1 e2
-    Equ e1 e2 -> getReqs e1 e2
-    Neq e1 e2 -> getReqs e1 e2
-    Add e1 e2 -> getReqs e1 e2
-    Sub e1 e2 -> getReqs e1 e2
-    Mul e1 e2 -> getReqs e1 e2
-    Mod e1 e2 -> getReqs e1 e2
-    Not e1 -> getTypeRequirements $ AnyExpression e1
-    Neg e1 -> getTypeRequirements $ AnyExpression e1
+    Binop _ e1 e2 -> getReqs e1 e2
+    Unop _ e1 -> getTypeRequirements $ AnyExpression e1
   where
     getReqs
       :: (Eq v, STypeable t)

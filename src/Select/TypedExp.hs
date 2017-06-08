@@ -33,6 +33,21 @@ module Select.TypedExp
   , colInt
   , colReal
   , colString
+  , eadd
+  , eand
+  , ediv
+  , eequ
+  , egt
+  , egte
+  , elt
+  , elte
+  , emod
+  , emul
+  , enot
+  , eneg
+  , eneq
+  , eor
+  , esub
   , evaluateExpression
   , fromValue
   , iColumn
@@ -114,21 +129,43 @@ deriving instance Show v => Show (ExpressionError v)
 data Expression t v where
   Literal :: STypeable t => t -> Expression t v
   Column :: STypeable t => v -> Expression t v
-  Not :: Expression Bool v -> Expression Bool v
-  And :: Expression Bool v -> Expression Bool v -> Expression Bool v
-  Or  :: Expression Bool v -> Expression Bool v -> Expression Bool v
-  Equ :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
-  Neq :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
-  Gt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-  Gte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-  Lt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-  Lte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-  Neg :: (STypeable t, Num t) => Expression t v -> Expression t v
-  Add :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
-  Sub :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
-  Mul :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
-  Div :: (STypeable t, Fractional t) => Expression t v -> Expression t v -> Expression t v
-  Mod :: (STypeable t, Integral t) => Expression t v -> Expression t v -> Expression t v
+  Binop ::
+      (STypeable i, STypeable t) =>
+      (i -> i -> t) -> Expression i v -> Expression i v -> Expression t v
+  Unop ::
+      (STypeable i, STypeable t) =>
+      (i -> t) -> Expression i v -> Expression t v
+
+enot :: Expression Bool v -> Expression Bool v
+enot = Unop not
+eneg :: (STypeable t, Num t) => Expression t v -> Expression t v
+eneg = Unop (negate)
+eequ :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
+eequ = Binop (==)
+eneq :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
+eneq = Binop (/=)
+eand :: Expression Bool v -> Expression Bool v -> Expression Bool v
+eand = Binop (&&)
+eor  :: Expression Bool v -> Expression Bool v -> Expression Bool v
+eor = Binop (||)
+egt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+egt = Binop (>)
+egte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+egte = Binop (>=)
+elt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+elt = Binop (<)
+elte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
+elte = Binop (<=)
+eadd :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
+eadd = Binop (+)
+esub :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
+esub = Binop (-)
+emul :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
+emul = Binop (*)
+ediv :: (STypeable t, Fractional t) => Expression t v -> Expression t v -> Expression t v
+ediv = Binop (/)
+emod :: (STypeable t, Integral t) => Expression t v -> Expression t v -> Expression t v
+emod = Binop (mod)
 
 type BinaryBuilder t rt v = (Expression t v -> Expression t v -> Expression rt v)
 
@@ -141,29 +178,9 @@ evaluateExpression bindings expr =
     Column name -> do
       binding <- justErr (BindingError name bindings) $ lookup name bindings
       justErr (TypeError name bindings) $ fromValue binding
-    Not e1 -> not <$> eval e1
-    Neg e1 -> negate <$> eval e1
-    And e1 e2 -> applyBinary (&&) e1 e2
-    Gt  e1 e2 -> applyBinary (>)  e1 e2
-    Gte e1 e2 -> applyBinary (>=) e1 e2
-    Lt  e1 e2 -> applyBinary (<)  e1 e2
-    Lte e1 e2 -> applyBinary (<=) e1 e2
-    Or  e1 e2 -> applyBinary (||) e1 e2
-    Equ e1 e2 -> applyBinary (==) e1 e2
-    Neq e1 e2 -> applyBinary (/=) e1 e2
-    Add e1 e2 -> applyBinary (+)  e1 e2
-    Sub e1 e2 -> applyBinary (-)  e1 e2
-    Mul e1 e2 -> applyBinary (*)  e1 e2
-    Mod e1 e2 -> applyBinary mod  e1 e2
-    Div e1 e2 -> applyBinary (/)  e1 e2
+    Binop op e1 e2 -> op <$> eval e1 <*> eval e2
+    Unop op e -> op <$> eval e
   where
-    applyBinary
-      :: (STypeable t2)
-      => (t2 -> t2 -> t3)
-      -> Expression t2 v
-      -> Expression t2 v
-      -> Either (ExpressionError v) t3
-    applyBinary op e1 e2 = op <$> eval e1 <*> eval e2
     eval
       :: (STypeable t1)
       => Expression t1 v -> Either (ExpressionError v) t1

@@ -39,13 +39,13 @@ typeExpression reqs expr =
     UE.Column name ->
       justErr TR.BadExpressionError $ getColumnOfType name <$> lookup name reqs
     UE.LiteralBool b -> Right $ TE.AnyExpression $ TE.Literal b
-    UE.And e1 e2 -> construct TE.And e1 e2
-    UE.Or e1 e2 -> construct TE.Or e1 e2
-    UE.Add e1 e2 -> constructNumeric TE.Add e1 e2
-    UE.Equ e1 e2 -> constructOrdered TE.Equ e1 e2
-    UE.Lt e1 e2 -> constructOrdered TE.Lt e1 e2
-    UE.Not e1 -> TE.AnyExpression . TE.Not <$> (recurse e1 >>= getExpressionOfType)
-    UE.Div e1 e2 -> construct (TE.Div :: TE.BinaryBuilder Double Double v) e1 e2
+    UE.And e1 e2 -> construct TE.eand e1 e2
+    UE.Or e1 e2 -> construct TE.eor e1 e2
+    UE.Add e1 e2 -> constructNumeric TE.eadd e1 e2
+    UE.Equ e1 e2 -> constructOrdered TE.eequ e1 e2
+    UE.Lt e1 e2 -> constructOrdered TE.elt e1 e2
+    UE.Not e1 -> TE.AnyExpression . TE.enot <$> (recurse e1 >>= getExpressionOfType)
+    UE.Div e1 e2 -> construct (TE.ediv :: TE.BinaryBuilder Double Double v) e1 e2
   where
     constructNumeric
       :: (forall t. (TE.STypeable t, Num t) => TE.BinaryBuilder t t v)
