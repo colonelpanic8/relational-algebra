@@ -128,44 +128,44 @@ deriving instance Show v => Show (ExpressionError v)
 
 data Expression t v where
   Literal :: STypeable t => t -> Expression t v
-  Column :: STypeable t => v -> Expression t v
-  Binop ::
+  Column  :: STypeable t => v -> Expression t v
+  Binop   ::
       (STypeable i, STypeable t) =>
       (i -> i -> t) -> Expression i v -> Expression i v -> Expression t v
-  Unop ::
+  Unop    ::
       (STypeable i, STypeable t) =>
       (i -> t) -> Expression i v -> Expression t v
 
-enot :: Expression Bool v -> Expression Bool v
-enot = Unop not
-eneg :: (STypeable t, Num t) => Expression t v -> Expression t v
-eneg = Unop (negate)
-eequ :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
-eequ = Binop (==)
-eneq :: (STypeable t) => Expression t v -> Expression t v -> Expression Bool v
-eneq = Binop (/=)
-eand :: Expression Bool v -> Expression Bool v -> Expression Bool v
-eand = Binop (&&)
-eor  :: Expression Bool v -> Expression Bool v -> Expression Bool v
-eor = Binop (||)
-egt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-egt = Binop (>)
-egte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-egte = Binop (>=)
-elt  :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-elt = Binop (<)
-elte :: (STypeable t, Ord t) => Expression t v -> Expression t v -> Expression Bool v
-elte = Binop (<=)
-eadd :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
-eadd = Binop (+)
-esub :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
-esub = Binop (-)
-emul :: (STypeable t, Num t) => Expression t v -> Expression t v -> Expression t v
-emul = Binop (*)
-ediv :: (STypeable t, Fractional t) => Expression t v -> Expression t v -> Expression t v
-ediv = Binop (/)
-emod :: (STypeable t, Integral t) => Expression t v -> Expression t v -> Expression t v
-emod = Binop (mod)
+enot ::                                Expression Bool v -> Expression Bool v
+enot                                = Unop not
+eneg :: (STypeable t, Num t)        => Expression t v    -> Expression t v
+eneg                                = Unop (negate)
+eand ::                                Expression Bool v -> Expression Bool v -> Expression Bool v
+eand                                = Binop (&&)
+eor  ::                                Expression Bool v -> Expression Bool v -> Expression Bool v
+eor                                 = Binop (||)
+eequ :: (STypeable t)               => Expression t v    -> Expression t v    -> Expression Bool v
+eequ                                = Binop (==)
+eneq :: (STypeable t)               => Expression t v    -> Expression t v    -> Expression Bool v
+eneq                                = Binop (/=)
+egt  :: (STypeable t, Ord t)        => Expression t v    -> Expression t v    -> Expression Bool v
+egt                                 = Binop (>)
+egte :: (STypeable t, Ord t)        => Expression t v    -> Expression t v    -> Expression Bool v
+egte                                = Binop (>=)
+elt  :: (STypeable t, Ord t)        => Expression t v    -> Expression t v    -> Expression Bool v
+elt                                 = Binop (<)
+elte :: (STypeable t, Ord t)        => Expression t v    -> Expression t v    -> Expression Bool v
+elte                                = Binop (<=)
+eadd :: (STypeable t, Num t)        => Expression t v    -> Expression t v    -> Expression t v
+eadd                                = Binop (+)
+esub :: (STypeable t, Num t)        => Expression t v    -> Expression t v    -> Expression t v
+esub                                = Binop (-)
+emul :: (STypeable t, Num t)        => Expression t v    -> Expression t v    -> Expression t v
+emul                                = Binop (*)
+ediv :: (STypeable t, Fractional t) => Expression t v    -> Expression t v    -> Expression t v
+ediv                                = Binop (/)
+emod :: (STypeable t, Integral t)   => Expression t v    -> Expression t v    -> Expression t v
+emod                                = Binop (mod)
 
 type BinaryBuilder t rt v = (Expression t v -> Expression t v -> Expression rt v)
 
@@ -191,19 +191,19 @@ as ::
   Expression t v -> scope -> Named scope (AnyExpression v)
 as x = AS (AnyExpression x)
 
-sColumn :: t -> Expression String t
-sColumn = Column
-iColumn :: t -> Expression Int t
-iColumn = Column
-bColumn :: t -> Expression Bool t
-bColumn = Column
-rColumn :: t -> Expression Double t
-rColumn = Column
+sColumn   :: t -> Expression String t
+sColumn   = Column
+iColumn   :: t -> Expression Int t
+iColumn   = Column
+bColumn   :: t -> Expression Bool t
+bColumn   = Column
+rColumn   :: t -> Expression Double t
+rColumn   = Column
 colString :: v -> AnyExpression v
 colString = AnyExpression . sColumn
-colBool :: v -> AnyExpression v
-colBool = AnyExpression . bColumn
-colReal :: v -> AnyExpression v
-colReal = AnyExpression . rColumn
-colInt :: v -> AnyExpression v
-colInt = AnyExpression . iColumn
+colBool   :: v -> AnyExpression v
+colBool   = AnyExpression . bColumn
+colReal   :: v -> AnyExpression v
+colReal   = AnyExpression . rColumn
+colInt    :: v -> AnyExpression v
+colInt    = AnyExpression . iColumn
